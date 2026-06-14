@@ -19,10 +19,10 @@
 - Create: `tests/selftest.ps1`
 - Modify: `src/AgentMemoryManager.ps1`
 
-- [ ] Ensure `src/AgentMemoryManager.ps1` and `src/launch.vbs` are retained as editable source.
-- [ ] Add `scripts/build.ps1` to package `src/AgentMemoryManager.ps1` and `src/launch.vbs` into `AgentMemoryManager_new.exe`.
-- [ ] Add `tests/selftest.ps1` to run `src/AgentMemoryManager.ps1 -SelfTest`.
-- [ ] Add documentation describing project structure, build command, test command, and feature responsibilities.
+- [x] Ensure `src/AgentMemoryManager.ps1` and `src/launch.vbs` are retained as editable source.
+- [x] Add `scripts/build.ps1` to package `src/AgentMemoryManager.ps1` and `src/launch.vbs` into `CrossAgnetCoding.exe`.
+- [x] Add `tests/selftest.ps1` to run `src/AgentMemoryManager.ps1 -SelfTest`.
+- [x] Add documentation describing project structure, build command, test command, and feature responsibilities.
 
 ### Task 2: Coding Agent Detection
 
@@ -30,14 +30,14 @@
 - Modify: `src/AgentMemoryManager.ps1`
 - Test: `tests/selftest.ps1`
 
-- [ ] Add `Get-AgentClientStatuses` to detect Codex, TRAE SOLO CN, OpenCode, and Claude Code.
-- [ ] Detect installation by command and/or config path:
+- [x] Add `Get-AgentClientStatuses` to detect Codex, TRAE SOLO CN, OpenCode, and Claude Code.
+- [x] Detect installation by command and/or config path:
   - Codex: `codex.exe` or `%USERPROFILE%\.codex\config.toml`
   - TRAE SOLO CN: `%APPDATA%\TRAE SOLO CN\User\mcp.json`
   - OpenCode: `opencode` or `%USERPROFILE%\.config\opencode\opencode.json`
   - Claude Code: `claude` or `%USERPROFILE%\.claude`
-- [ ] Detect MCP configured state by checking each config for the `agentmemory` server and `AGENTMEMORY_URL=http://localhost:3111`.
-- [ ] Add self-test checks for all client definitions and config templates.
+- [x] Detect MCP configured state by checking each config for the `agentmemory` server and `AGENTMEMORY_URL=http://localhost:3111`.
+- [x] Add self-test checks for all client definitions and config templates.
 
 ### Task 3: MCP And CLI Configuration
 
@@ -45,13 +45,13 @@
 - Modify: `src/AgentMemoryManager.ps1`
 - Test: `tests/selftest.ps1`
 
-- [ ] Add `Configure-CodexMcp`, `Configure-TraeMcp`, `Configure-OpenCodeMcp`, and `Configure-ClaudeMcp`.
-- [ ] Back up config files before writing using `.bak-YYYYMMDDHHMMSS`.
-- [ ] For Codex, append/replace `[mcp_servers.agentmemory]` and `[mcp_servers.agentmemory.env]` in `config.toml`.
-- [ ] For TRAE SOLO CN, merge `agentmemory` into `mcpServers` in `User\mcp.json`.
-- [ ] For OpenCode, merge `mcp.agentmemory` into `opencode.json`.
-- [ ] For Claude Code, create/update `%USERPROFILE%\.claude\mcp.json` with `mcpServers.agentmemory` when the CLI is unavailable; when the CLI exists, still provide copyable CLI commands.
-- [ ] Add copy buttons for MCP JSON and CLI commands.
+- [x] Add `Configure-CodexMcp`, `Configure-TraeMcp`, `Configure-OpenCodeMcp`, and `Configure-ClaudeMcp`.
+- [x] Back up config files before writing using `.bak-YYYYMMDDHHMMSS`.
+- [x] For Codex, append/replace `[mcp_servers.agentmemory]` and `[mcp_servers.agentmemory.env]` in `config.toml`.
+- [x] For TRAE SOLO CN, merge `agentmemory` into `mcpServers` in `User\mcp.json`.
+- [x] For OpenCode, merge `mcp.agentmemory` into `opencode.json`.
+- [x] For Claude Code, create/update `%USERPROFILE%\.claude\mcp.json` with `mcpServers.agentmemory` when the CLI is unavailable; when the CLI exists, still provide copyable CLI commands.
+- [x] Add copy buttons for MCP JSON and CLI commands.
 
 ### Task 4: UI And Packaging Verification
 
@@ -60,9 +60,9 @@
 - Modify: `docs/FUNCTIONS.md`
 - Build: `AgentMemoryManager_new.exe`
 
-- [ ] Add a `Coding Agent Access` group to the UI with status lines and buttons.
-- [ ] Keep Chinese/English language switching for all new strings.
-- [ ] Run `tests/selftest.ps1`.
-- [ ] Build `AgentMemoryManager_new.exe`.
-- [ ] Verify package `RUNPROGRAM` is `wscript.exe launch.vbs`, not `cmd /c`.
-- [ ] Smoke start the exe and verify no `cmd.exe` process is launched.
+- [x] Add a `Coding Agent Access` group to the UI with status lines and buttons.
+- [x] Keep Chinese/English language switching for all new strings.
+- [x] Run `tests/selftest.ps1`.
+- [x] Build `CrossAgnetCoding.exe`.
+- [x] Verify package `RUNPROGRAM` is `wscript.exe launch.vbs`, not `cmd /c`.
+- [x] Smoke start the exe and verify no `cmd.exe` process is launched.

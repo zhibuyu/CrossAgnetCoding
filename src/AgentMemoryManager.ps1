@@ -1,5 +1,10 @@
 ﻿param(
-    [switch]$SelfTest
+    [switch]$SelfTest,
+    [switch]$Cli,
+    [switch]$Tui,
+    [switch]$UiSmokeTest,
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$CommandArgs = @()
 )
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -11,16 +16,32 @@ $script:AM_DIR = Join-Path $env:USERPROFILE ".agentmemory"
 $script:LOCAL_BIN = Join-Path $env:USERPROFILE ".local\bin"
 $script:NPM_GLOBAL = Join-Path $env:APPDATA "npm"
 $script:APP_NAME = "CrossAgnetCoding"
-$script:APP_VERSION = "0.2.0"
+$script:APP_VERSION = "0.3.0-mvp"
 $script:PORT = 3111
 $script:Language = "zh"
 $script:IsBusy = $false
+$script:CliExitCode = 0
+$script:NodeVersionCache = ""
+$script:NodeVersionCacheTime = [datetime]::MinValue
+$script:NodeVersionFailureTime = [datetime]::MinValue
+$script:NodeVersionCacheSeconds = 30
+$script:NodeVersionFailureCooldownSeconds = 300
 
 $script:Text = @{
     zh = @{
-        WindowTitle = "CrossAgnetCoding v0.2.0"
+        WindowTitle = "CrossAgnetCoding v0.3.0-mvp"
         Title = "CrossAgnetCoding 跨 Coding Agent 记忆管理器"
-        EnvCheck = "环境检查"
+        SettingsTitle = "设置"
+        AboutTab = "关于"
+        GeneralTab = "通用"
+        RouteTab = "路由"
+        AuthTab = "认证"
+        AdvancedTab = "高级"
+        UsageTab = "使用统计"
+        AICodeToolAbout = "关于"
+        AboutDescription = "查看版本信息与本地 AI Code 工具接入状态。"
+        LocalEnvCheck = "本地环境检查"
+        EnvCheck = "基础依赖"
         ServiceStatus = "服务状态"
         LastAction = "操作反馈"
         InstallAll = "安装全部"
@@ -28,10 +49,33 @@ $script:Text = @{
         StopService = "停止服务"
         CopyMcp = "复制 MCP 配置到剪贴板"
         CodingAgentAccess = "Coding Agent 接入"
-        ScanAgents = "扫描 Agent"
+        ScanAgents = "刷新"
         ConfigureAgents = "一键配置 MCP"
         CopyCli = "复制 CLI 命令"
         SyncSharedFiles = "同步共享 Prompt"
+        BridgeWorkspace = "桥接工作区"
+        MigrateDataHome = "迁移数据目录"
+        OfficialSite = "官方网站"
+        GitHub = "GitHub"
+        Changelog = "更新日志"
+        CheckUpdate = "检查更新"
+        DiagnoseConflicts = "诊断安装冲突"
+        UpgradeAll = "全部升级 (0)"
+        ConfigureAll = "全部配置"
+        CurrentVersion = "当前版本"
+        LatestVersion = "最新版本"
+        ConfigStatus = "配置状态"
+        InstallStatus = "安装状态"
+        Installed = "已安装"
+        NotInstalled = "未安装"
+        Configured = "已连接 CrossAgnetCoding"
+        NotConfigured = "未连接 CrossAgnetCoding"
+        UnknownVersion = "可执行，版本未知"
+        NotChecked = "未检查"
+        InstallOrExecutableMissing = "not installed or not executable"
+        ConfigureTool = "配置"
+        ReconfigureTool = "重新配置"
+        ToolConfigureDone = "{0} 已写入 CrossAgnetCoding MCP 配置"
         AgentInstalledConfigured = "{0} - 已安装 / 已配置"
         AgentInstalledNotConfigured = "{0} - 已安装 / 未配置"
         AgentMissingConfigured = "{0} - 未检测到安装 / 已有配置"
@@ -39,9 +83,15 @@ $script:Text = @{
         AgentScanDone = "Coding Agent 扫描完成"
         AgentConfigureDone = "Coding Agent MCP 配置完成，请重启对应工具"
         AgentConfigureTitle = "配置完成"
-        AgentConfigureBody = "已尝试写入 Codex、TRAE SOLO CN、OpenCode、Claude Code 的用户级 MCP 配置。请查看日志并重启对应工具。"
+        AgentConfigureBody = "已尝试写入 Codex、TRAE SOLO、OpenCode、Claude、Gemini、OpenClaw、Hermes 的用户级 MCP 配置。请查看日志并重启对应工具。"
         CopyCliOkBody = "CLI 配置命令已复制到剪贴板。"
         SyncSharedDone = "共享 Prompt 文件已同步"
+        BridgeWorkspacePrompt = "请选择要桥接记忆的项目目录"
+        BridgeWorkspaceDone = "工作区桥接完成：{0}"
+        BridgeWorkspaceTitle = "桥接完成"
+        MigrateDataPrompt = "请选择新的 CrossAgnetCoding 数据目录"
+        MigrateDataDone = "数据目录已迁移：{0}"
+        MigrateDataTitle = "迁移完成"
         Log = "日志"
         Ready = "就绪"
         NodeInstalled = "Node.js - 已安装 {0}"
@@ -87,9 +137,19 @@ $script:Text = @{
         InitialLog3 = "安装完成后点击 [启动服务]"
     }
     en = @{
-        WindowTitle = "CrossAgnetCoding v0.2.0"
+        WindowTitle = "CrossAgnetCoding v0.3.0-mvp"
         Title = "CrossAgnetCoding Cross-Agent Memory Manager"
-        EnvCheck = "Environment Check"
+        SettingsTitle = "Settings"
+        AboutTab = "About"
+        GeneralTab = "General"
+        RouteTab = "Route"
+        AuthTab = "Auth"
+        AdvancedTab = "Advanced"
+        UsageTab = "Usage"
+        AICodeToolAbout = "About"
+        AboutDescription = "Review version information and local AI Code tool connection status."
+        LocalEnvCheck = "Local Environment Check"
+        EnvCheck = "Core Dependencies"
         ServiceStatus = "Service Status"
         LastAction = "Action Feedback"
         InstallAll = "Install All"
@@ -97,10 +157,33 @@ $script:Text = @{
         StopService = "Stop Service"
         CopyMcp = "Copy MCP Config to Clipboard"
         CodingAgentAccess = "Coding Agent Access"
-        ScanAgents = "Scan Agents"
+        ScanAgents = "Refresh"
         ConfigureAgents = "Configure MCP"
         CopyCli = "Copy CLI Commands"
         SyncSharedFiles = "Sync Shared Prompt"
+        BridgeWorkspace = "Bridge Workspace"
+        MigrateDataHome = "Migrate Data Home"
+        OfficialSite = "Official Site"
+        GitHub = "GitHub"
+        Changelog = "Changelog"
+        CheckUpdate = "Check Updates"
+        DiagnoseConflicts = "Diagnose Conflicts"
+        UpgradeAll = "Upgrade All (0)"
+        ConfigureAll = "Configure All"
+        CurrentVersion = "Current Version"
+        LatestVersion = "Latest Version"
+        ConfigStatus = "Config Status"
+        InstallStatus = "Install Status"
+        Installed = "Installed"
+        NotInstalled = "Not Installed"
+        Configured = "Connected to CrossAgnetCoding"
+        NotConfigured = "Not Connected to CrossAgnetCoding"
+        UnknownVersion = "Executable, version unknown"
+        NotChecked = "Not Checked"
+        InstallOrExecutableMissing = "not installed or not executable"
+        ConfigureTool = "Configure"
+        ReconfigureTool = "Reconfigure"
+        ToolConfigureDone = "{0} CrossAgnetCoding MCP config written"
         AgentInstalledConfigured = "{0} - Installed / Configured"
         AgentInstalledNotConfigured = "{0} - Installed / Not Configured"
         AgentMissingConfigured = "{0} - Not Detected / Configured"
@@ -108,9 +191,15 @@ $script:Text = @{
         AgentScanDone = "Coding Agent scan complete"
         AgentConfigureDone = "Coding Agent MCP configuration complete. Restart the tools."
         AgentConfigureTitle = "Configured"
-        AgentConfigureBody = "User-level MCP config was written for Codex, TRAE SOLO CN, OpenCode, and Claude Code when possible. Check the log and restart the tools."
+        AgentConfigureBody = "User-level MCP config was written for Codex, TRAE SOLO, OpenCode, Claude, Gemini, OpenClaw, and Hermes when possible. Check the log and restart the tools."
         CopyCliOkBody = "CLI configuration commands copied to clipboard."
         SyncSharedDone = "Shared prompt files synced"
+        BridgeWorkspacePrompt = "Choose the project directory to bridge"
+        BridgeWorkspaceDone = "Workspace bridge complete: {0}"
+        BridgeWorkspaceTitle = "Bridge Complete"
+        MigrateDataPrompt = "Choose the new CrossAgnetCoding data directory"
+        MigrateDataDone = "Data directory migrated: {0}"
+        MigrateDataTitle = "Migration Complete"
         Log = "Log"
         Ready = "Ready"
         NodeInstalled = "Node.js - Installed {0}"
@@ -197,16 +286,61 @@ function Set-ManagerEnv {
     $env:Path = ($parts | Where-Object { $_ -and $_.Trim().Length -gt 0 }) -join ";"
 }
 
-function Get-NodeVersion {
+function Get-NodeVersionFromFile {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) {
+        return ""
+    }
+
     try {
-        $cmd = Get-Command node.exe -ErrorAction Stop
-        $version = & $cmd.Source -v 2>$null
-        if ($LASTEXITCODE -eq 0 -and $version) {
-            return [string]$version
+        $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($Path).ProductVersion
+        if (-not [string]::IsNullOrWhiteSpace($version)) {
+            $clean = ([string]$version).Trim()
+            if ($clean -notmatch "^v") {
+                $clean = "v$clean"
+            }
+            return $clean
         }
     } catch {
     }
 
+    return ""
+}
+
+function Get-NodeVersion {
+    $now = Get-Date
+    if ($script:NodeVersionCache -and (($now - $script:NodeVersionCacheTime).TotalSeconds -lt $script:NodeVersionCacheSeconds)) {
+        return $script:NodeVersionCache
+    }
+
+    if (($now - $script:NodeVersionFailureTime).TotalSeconds -lt $script:NodeVersionFailureCooldownSeconds) {
+        return ""
+    }
+
+    try {
+        $cmd = Get-Command node.exe -ErrorAction Stop
+        $fileVersion = Get-NodeVersionFromFile -Path $cmd.Source
+        if ($fileVersion) {
+            $script:NodeVersionCache = $fileVersion
+            $script:NodeVersionCacheTime = $now
+            return $fileVersion
+        }
+
+        if ($env:CAC_TEST_NO_NODE_EXEC -eq "1") {
+            return ""
+        }
+
+        $version = & $cmd.Source -v 2>$null
+        if ($LASTEXITCODE -eq 0 -and $version) {
+            $script:NodeVersionCache = [string]$version
+            $script:NodeVersionCacheTime = $now
+            return $script:NodeVersionCache
+        }
+    } catch {
+    }
+
+    $script:NodeVersionFailureTime = $now
     return ""
 }
 
@@ -334,12 +468,40 @@ function Write-JsonObject {
     Set-Content -LiteralPath $Path -Value $json -Encoding UTF8
 }
 
+function Get-CommandAny {
+    param([string[]]$Names)
+
+    foreach ($name in $Names) {
+        $cmd = Get-Command $name -ErrorAction SilentlyContinue
+        if ($null -ne $cmd) {
+            return $cmd
+        }
+    }
+
+    return $null
+}
+
 function Get-CodexConfigPath {
+    if ($env:AM_MANAGER_WRITE_TEST -ne "1" -and -not [string]::IsNullOrWhiteSpace($env:CODEX_HOME) -and (Test-Path -LiteralPath $env:CODEX_HOME)) {
+        return (Join-Path $env:CODEX_HOME "config.toml")
+    }
+
     return (Join-Path $env:USERPROFILE ".codex\config.toml")
 }
 
 function Get-TraeConfigPath {
     return (Join-Path $env:APPDATA "TRAE SOLO CN\User\mcp.json")
+}
+
+function Get-TraeSoloConfigPath {
+    return (Join-Path $env:APPDATA "TRAE SOLO\User\mcp.json")
+}
+
+function Get-TraeConfigPaths {
+    return @(
+        (Get-TraeConfigPath),
+        (Get-TraeSoloConfigPath)
+    )
 }
 
 function Get-OpenCodeConfigPath {
@@ -348,6 +510,118 @@ function Get-OpenCodeConfigPath {
 
 function Get-ClaudeConfigPath {
     return (Join-Path $env:USERPROFILE ".claude\mcp.json")
+}
+
+function Get-ClaudeDesktopConfigPath {
+    return (Join-Path $env:APPDATA "Claude\claude_desktop_config.json")
+}
+
+function Get-GeminiConfigPath {
+    return (Join-Path $env:USERPROFILE ".gemini\settings.json")
+}
+
+function Get-OpenClawConfigPath {
+    return (Join-Path $env:USERPROFILE ".openclaw\openclaw.json")
+}
+
+function Get-HermesConfigPath {
+    return (Join-Path $env:USERPROFILE ".hermes\config.yaml")
+}
+
+function Get-AgentTargetDefinitions {
+    return @(
+        [pscustomobject]@{
+            Id = "codex"
+            Name = "Codex"
+            CommandNames = @("codex.exe", "codex")
+            InstallRoot = (Split-Path -Parent (Get-CodexConfigPath))
+            ConfigPath = Get-CodexConfigPath
+            PromptFile = "AGENTS.md"
+            ConfigureAction = "Configure-CodexMcp"
+        },
+        [pscustomobject]@{
+            Id = "trae-cn"
+            Name = "TRAE SOLO CN"
+            CommandNames = @()
+            InstallRoot = (Join-Path $env:APPDATA "TRAE SOLO CN")
+            ConfigPath = Get-TraeConfigPath
+            PromptFile = "TRAE.md"
+            ConfigureAction = "Configure-TraeCnMcp"
+        },
+        [pscustomobject]@{
+            Id = "trae"
+            Name = "TRAE SOLO"
+            CommandNames = @()
+            InstallRoot = (Join-Path $env:APPDATA "TRAE SOLO")
+            ConfigPath = Get-TraeSoloConfigPath
+            PromptFile = "TRAE.md"
+            ConfigureAction = "Configure-TraeSoloMcp"
+        },
+        [pscustomobject]@{
+            Id = "claude-code"
+            Name = "Claude Code"
+            CommandNames = @("claude.exe", "claude")
+            InstallRoot = (Join-Path $env:USERPROFILE ".claude")
+            ConfigPath = Get-ClaudeConfigPath
+            PromptFile = "CLAUDE.md"
+            ConfigureAction = "Configure-ClaudeMcp"
+        },
+        [pscustomobject]@{
+            Id = "claude-desktop"
+            Name = "Claude Desktop"
+            CommandNames = @()
+            InstallRoot = (Join-Path $env:APPDATA "Claude")
+            ConfigPath = Get-ClaudeDesktopConfigPath
+            PromptFile = "CLAUDE.md"
+            ConfigureAction = "Configure-ClaudeDesktopMcp"
+        },
+        [pscustomobject]@{
+            Id = "gemini"
+            Name = "Gemini CLI"
+            CommandNames = @("gemini.exe", "gemini.cmd", "gemini")
+            InstallRoot = (Join-Path $env:USERPROFILE ".gemini")
+            ConfigPath = Get-GeminiConfigPath
+            PromptFile = "GEMINI.md"
+            ConfigureAction = "Configure-GeminiMcp"
+        },
+        [pscustomobject]@{
+            Id = "opencode"
+            Name = "OpenCode"
+            CommandNames = @("opencode.exe", "opencode")
+            InstallRoot = (Join-Path $env:USERPROFILE ".config\opencode")
+            ConfigPath = Get-OpenCodeConfigPath
+            PromptFile = "AGENTS.md"
+            ConfigureAction = "Configure-OpenCodeMcp"
+        },
+        [pscustomobject]@{
+            Id = "openclaw"
+            Name = "OpenClaw"
+            CommandNames = @("openclaw.exe", "openclaw")
+            InstallRoot = (Join-Path $env:USERPROFILE ".openclaw")
+            ConfigPath = Get-OpenClawConfigPath
+            PromptFile = "OPENCLAW.md"
+            ConfigureAction = "Configure-OpenClawMcp"
+        },
+        [pscustomobject]@{
+            Id = "hermes"
+            Name = "Hermes Agent"
+            CommandNames = @("hermes.exe", "hermes")
+            InstallRoot = (Join-Path $env:USERPROFILE ".hermes")
+            ConfigPath = Get-HermesConfigPath
+            PromptFile = "HERMES.md"
+            ConfigureAction = "Configure-HermesMcp"
+        }
+    )
+}
+
+function Configure-JsonMcpServers {
+    param([string]$Path)
+
+    $config = Read-JsonObject -Path $Path
+    $servers = Ensure-PropertyObject -Object $config -Name "mcpServers"
+    $servers | Add-Member -NotePropertyName "agentmemory" -NotePropertyValue ([pscustomobject](Get-AgentMemoryServerObject)) -Force
+    Write-JsonObject -Path $Path -Object $config
+    return $Path
 }
 
 function Configure-CodexMcp {
@@ -380,13 +654,26 @@ AGENTMEMORY_URL = "http://localhost:3111"
     return $path
 }
 
+function Configure-TraeCnMcp {
+    return (Configure-JsonMcpServers -Path (Get-TraeConfigPath))
+}
+
+function Configure-TraeSoloMcp {
+    return (Configure-JsonMcpServers -Path (Get-TraeSoloConfigPath))
+}
+
 function Configure-TraeMcp {
-    $path = Get-TraeConfigPath
-    $config = Read-JsonObject -Path $path
-    $servers = Ensure-PropertyObject -Object $config -Name "mcpServers"
-    $servers | Add-Member -NotePropertyName "agentmemory" -NotePropertyValue ([pscustomobject](Get-AgentMemoryServerObject)) -Force
-    Write-JsonObject -Path $path -Object $config
-    return $path
+    param([switch]$All)
+
+    if ($All) {
+        $paths = New-Object System.Collections.Generic.List[string]
+        foreach ($path in Get-TraeConfigPaths) {
+            [void]$paths.Add((Configure-JsonMcpServers -Path $path))
+        }
+        return @($paths)
+    }
+
+    return (Configure-TraeCnMcp)
 }
 
 function Configure-OpenCodeMcp {
@@ -407,11 +694,41 @@ function Configure-OpenCodeMcp {
 }
 
 function Configure-ClaudeMcp {
-    $path = Get-ClaudeConfigPath
-    $config = Read-JsonObject -Path $path
-    $servers = Ensure-PropertyObject -Object $config -Name "mcpServers"
-    $servers | Add-Member -NotePropertyName "agentmemory" -NotePropertyValue ([pscustomobject](Get-AgentMemoryServerObject)) -Force
-    Write-JsonObject -Path $path -Object $config
+    return (Configure-JsonMcpServers -Path (Get-ClaudeConfigPath))
+}
+
+function Configure-ClaudeDesktopMcp {
+    return (Configure-JsonMcpServers -Path (Get-ClaudeDesktopConfigPath))
+}
+
+function Configure-GeminiMcp {
+    return (Configure-JsonMcpServers -Path (Get-GeminiConfigPath))
+}
+
+function Configure-OpenClawMcp {
+    return (Configure-JsonMcpServers -Path (Get-OpenClawConfigPath))
+}
+
+function Configure-HermesMcp {
+    $path = Get-HermesConfigPath
+    $dir = Split-Path -Parent $path
+    if (-not (Test-Path -LiteralPath $dir)) {
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+
+    Backup-ConfigFile -Path $path
+    $block = @"
+mcp_servers:
+  agentmemory:
+    command: npx
+    args: ["-y", "@agentmemory/mcp"]
+    env:
+      AGENTMEMORY_URL: "http://localhost:3111"
+
+memory:
+  provider: agentmemory
+"@
+    Set-Content -LiteralPath $path -Value ($block + "`r`n") -Encoding UTF8
     return $path
 }
 
@@ -421,54 +738,32 @@ function Get-CliConfigCommands {
         'claude mcp add-json agentmemory ''' + $mcpJson + '''',
         'codex: add [mcp_servers.agentmemory] to %USERPROFILE%\.codex\config.toml',
         'TRAE SOLO CN: paste mcpServers.agentmemory into %APPDATA%\TRAE SOLO CN\User\mcp.json',
-        'OpenCode: add mcp.agentmemory to %USERPROFILE%\.config\opencode\opencode.json'
+        'TRAE SOLO: paste mcpServers.agentmemory into %APPDATA%\TRAE SOLO\User\mcp.json',
+        'Gemini CLI: add mcpServers.agentmemory to %USERPROFILE%\.gemini\settings.json',
+        'OpenCode: add mcp.agentmemory to %USERPROFILE%\.config\opencode\opencode.json',
+        'OpenClaw: add mcpServers.agentmemory to %USERPROFILE%\.openclaw\openclaw.json',
+        'Hermes: add mcp_servers.agentmemory to %USERPROFILE%\.hermes\config.yaml'
     ) -join "`r`n"
 }
 
 function Get-AgentClientStatuses {
-    $codexPath = Get-CodexConfigPath
-    $traePath = Get-TraeConfigPath
-    $openCodePath = Get-OpenCodeConfigPath
-    $claudePath = Get-ClaudeConfigPath
+    $items = New-Object System.Collections.Generic.List[object]
 
-    $codexCmd = Get-Command codex.exe -ErrorAction SilentlyContinue
-    $openCodeCmd = Get-Command opencode -ErrorAction SilentlyContinue
-    $claudeCmd = Get-Command claude -ErrorAction SilentlyContinue
-
-    $items = @(
-        [pscustomobject]@{
-            Id = "codex"
-            Name = "Codex"
-            Installed = (($null -ne $codexCmd) -or (Test-Path -LiteralPath $codexPath))
-            CliAvailable = ($null -ne $codexCmd)
-            ConfigPath = $codexPath
-            Configured = (Test-Path -LiteralPath $codexPath) -and (Test-AgentMemoryTextConfigured (Get-Content -LiteralPath $codexPath -Raw -Encoding UTF8 -ErrorAction SilentlyContinue))
-        },
-        [pscustomobject]@{
-            Id = "trae"
-            Name = "TRAE SOLO CN"
-            Installed = (Test-Path -LiteralPath (Join-Path $env:APPDATA "TRAE SOLO CN"))
-            CliAvailable = $false
-            ConfigPath = $traePath
-            Configured = (Test-Path -LiteralPath $traePath) -and (Test-AgentMemoryTextConfigured (Get-Content -LiteralPath $traePath -Raw -Encoding UTF8 -ErrorAction SilentlyContinue))
-        },
-        [pscustomobject]@{
-            Id = "opencode"
-            Name = "OpenCode"
-            Installed = (($null -ne $openCodeCmd) -or (Test-Path -LiteralPath $openCodePath))
-            CliAvailable = ($null -ne $openCodeCmd)
-            ConfigPath = $openCodePath
-            Configured = (Test-Path -LiteralPath $openCodePath) -and (Test-AgentMemoryTextConfigured (Get-Content -LiteralPath $openCodePath -Raw -Encoding UTF8 -ErrorAction SilentlyContinue))
-        },
-        [pscustomobject]@{
-            Id = "claude"
-            Name = "Claude Code"
-            Installed = (($null -ne $claudeCmd) -or (Test-Path -LiteralPath (Join-Path $env:USERPROFILE ".claude")))
-            CliAvailable = ($null -ne $claudeCmd)
-            ConfigPath = $claudePath
-            Configured = (Test-Path -LiteralPath $claudePath) -and (Test-AgentMemoryTextConfigured (Get-Content -LiteralPath $claudePath -Raw -Encoding UTF8 -ErrorAction SilentlyContinue))
-        }
-    )
+    foreach ($target in Get-AgentTargetDefinitions) {
+        $cmd = Get-CommandAny -Names $target.CommandNames
+        $configPath = [string]$target.ConfigPath
+        $installed = (($null -ne $cmd) -or (Test-Path -LiteralPath $target.InstallRoot) -or (Test-Path -LiteralPath $configPath))
+        $configured = (Test-Path -LiteralPath $configPath) -and (Test-AgentMemoryTextConfigured (Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 -ErrorAction SilentlyContinue))
+        [void]$items.Add([pscustomobject]@{
+            Id = $target.Id
+            Name = $target.Name
+            Installed = $installed
+            CliAvailable = ($null -ne $cmd)
+            ConfigPath = $configPath
+            PromptFile = $target.PromptFile
+            Configured = $configured
+        })
+    }
 
     foreach ($item in $items) {
         $detail = if ($item.CliAvailable) { "CLI + MCP" } elseif ($item.Installed) { "MCP" } else { "not detected" }
@@ -478,17 +773,444 @@ function Get-AgentClientStatuses {
     return $items
 }
 
+function Get-ToolVersionText {
+    param([object]$CommandInfo)
+
+    if ($null -eq $CommandInfo) {
+        return T "NotInstalled"
+    }
+
+    $source = [string]$CommandInfo.Source
+    if (-not [string]::IsNullOrWhiteSpace($source) -and (Test-Path -LiteralPath $source)) {
+        try {
+            $versionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($source)
+            if (-not [string]::IsNullOrWhiteSpace($versionInfo.ProductVersion)) {
+                return ([string]$versionInfo.ProductVersion).Trim()
+            }
+            if (-not [string]::IsNullOrWhiteSpace($versionInfo.FileVersion)) {
+                return ([string]$versionInfo.FileVersion).Trim()
+            }
+        } catch {
+        }
+    }
+
+    return T "UnknownVersion"
+}
+
+function Get-AgentToolCards {
+    $cards = New-Object System.Collections.Generic.List[object]
+    $statuses = @{}
+    foreach ($status in Get-AgentClientStatuses) {
+        $statuses[$status.Id] = $status
+    }
+
+    foreach ($target in Get-AgentTargetDefinitions) {
+        $cmd = Get-CommandAny -Names $target.CommandNames
+        $status = $statuses[$target.Id]
+        $installedText = if ($status.Installed) { T "Installed" } else { T "NotInstalled" }
+        $configuredText = if ($status.Configured) { T "Configured" } else { T "NotConfigured" }
+        $detail = if ($status.Installed) {
+            if ($status.CliAvailable) { "CLI + MCP" } else { "MCP config path detected" }
+        } else {
+            T "InstallOrExecutableMissing"
+        }
+
+        [void]$cards.Add([pscustomobject]@{
+            Id = $target.Id
+            Name = $target.Name
+            Platform = "Win"
+            Installed = [bool]$status.Installed
+            Configured = [bool]$status.Configured
+            ConfigPath = $status.ConfigPath
+            CurrentVersion = Get-ToolVersionText -CommandInfo $cmd
+            LatestVersion = T "NotChecked"
+            InstallStatus = $installedText
+            ConfigStatus = $configuredText
+            Detail = $detail
+            ActionText = if ($status.Configured) { T "ReconfigureTool" } else { T "ConfigureTool" }
+        })
+    }
+
+    return $cards.ToArray()
+}
+
 function Configure-AllAgentClients {
     $paths = New-Object System.Collections.Generic.List[string]
-    [void]$paths.Add((Configure-CodexMcp))
-    [void]$paths.Add((Configure-TraeMcp))
-    [void]$paths.Add((Configure-OpenCodeMcp))
-    [void]$paths.Add((Configure-ClaudeMcp))
+    $errors = New-Object System.Collections.Generic.List[string]
+
+    $configureActions = @(
+        @{ Name = "Codex"; Action = { Configure-CodexMcp } },
+        @{ Name = "TRAE CN"; Action = { Configure-TraeCnMcp } },
+        @{ Name = "TRAE SOLO"; Action = { Configure-TraeSoloMcp } },
+        @{ Name = "OpenCode"; Action = { Configure-OpenCodeMcp } },
+        @{ Name = "Claude Code"; Action = { Configure-ClaudeMcp } },
+        @{ Name = "Claude Desktop"; Action = { Configure-ClaudeDesktopMcp } },
+        @{ Name = "Gemini CLI"; Action = { Configure-GeminiMcp } },
+        @{ Name = "OpenClaw"; Action = { Configure-OpenClawMcp } },
+        @{ Name = "Hermes Agent"; Action = { Configure-HermesMcp } }
+    )
+
+    foreach ($entry in $configureActions) {
+        try {
+            $result = & $entry.Action
+            if ($result) {
+                [void]$paths.Add($result)
+            }
+        } catch {
+            [void]$errors.Add("$($entry.Name): $($_.Exception.Message)")
+        }
+    }
+
+    if ($errors.Count -gt 0) {
+        Write-Log "Config warnings: $($errors -join '; ')"
+    }
+
     return @($paths)
 }
 
-function Get-CrossAgnetCodingHome {
+function Get-DefaultCrossAgnetCodingHome {
     return (Join-Path $env:USERPROFILE ".CrossAgnetCoding")
+}
+
+function Get-CrossAgnetCodingSettingsPath {
+    if (-not [string]::IsNullOrWhiteSpace($env:CROSSAGNETCODING_SETTINGS)) {
+        return $env:CROSSAGNETCODING_SETTINGS
+    }
+
+    return (Join-Path (Get-DefaultCrossAgnetCodingHome) "settings.json")
+}
+
+function Read-CrossAgnetCodingSettings {
+    $path = Get-CrossAgnetCodingSettingsPath
+    if (Test-Path -LiteralPath $path) {
+        try {
+            $raw = Get-Content -LiteralPath $path -Raw -Encoding UTF8
+            if (-not [string]::IsNullOrWhiteSpace($raw)) {
+                return ($raw | ConvertFrom-Json)
+            }
+        } catch {
+        }
+    }
+
+    return [pscustomobject]@{}
+}
+
+function Write-CrossAgnetCodingSettings {
+    param([object]$Settings)
+
+    $path = Get-CrossAgnetCodingSettingsPath
+    $dir = Split-Path -Parent $path
+    if (-not (Test-Path -LiteralPath $dir)) {
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+
+    Set-Content -LiteralPath $path -Value ($Settings | ConvertTo-Json -Depth 12) -Encoding UTF8
+    return $path
+}
+
+function Get-CrossAgnetCodingHome {
+    if (-not [string]::IsNullOrWhiteSpace($env:CROSSAGNETCODING_HOME)) {
+        return [System.IO.Path]::GetFullPath($env:CROSSAGNETCODING_HOME)
+    }
+
+    $settings = Read-CrossAgnetCodingSettings
+    if ($settings.PSObject.Properties.Name -contains "dataHome" -and -not [string]::IsNullOrWhiteSpace($settings.dataHome)) {
+        return [System.IO.Path]::GetFullPath([string]$settings.dataHome)
+    }
+
+    return (Get-DefaultCrossAgnetCodingHome)
+}
+
+function Move-CrossAgnetCodingHome {
+    param(
+        [string]$NewHome,
+        [switch]$SwitchOnly
+    )
+
+    if ([string]::IsNullOrWhiteSpace($NewHome)) {
+        throw "New CrossAgnetCoding data directory is required"
+    }
+
+    $oldHome = Get-CrossAgnetCodingHome
+    $targetHome = [System.IO.Path]::GetFullPath($NewHome)
+    if (-not (Test-Path -LiteralPath $targetHome)) {
+        New-Item -ItemType Directory -Path $targetHome -Force | Out-Null
+    }
+
+    $probe = Join-Path $targetHome ".write-test"
+    Set-Content -LiteralPath $probe -Value "ok" -Encoding UTF8
+    Remove-Item -LiteralPath $probe -Force
+
+    if (-not $SwitchOnly -and (Test-Path -LiteralPath $oldHome)) {
+        $oldFull = [System.IO.Path]::GetFullPath($oldHome).TrimEnd("\", "/")
+        $targetFull = $targetHome.TrimEnd("\", "/")
+        if ($targetFull.StartsWith($oldFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "New data directory cannot be inside the current data directory during migration"
+        }
+
+        Get-ChildItem -LiteralPath $oldHome -Force -ErrorAction SilentlyContinue | ForEach-Object {
+            $dest = Join-Path $targetHome $_.Name
+            Copy-Item -LiteralPath $_.FullName -Destination $dest -Recurse -Force
+        }
+    }
+
+    $settings = Read-CrossAgnetCodingSettings
+    if (-not ($settings.PSObject.Properties.Name -contains "dataHome")) {
+        $settings | Add-Member -NotePropertyName "dataHome" -NotePropertyValue $targetHome -Force
+    } else {
+        $settings.dataHome = $targetHome
+    }
+    $settings | Add-Member -NotePropertyName "updatedAt" -NotePropertyValue ((Get-Date).ToString("o")) -Force
+    [void](Write-CrossAgnetCodingSettings -Settings $settings)
+
+    return [pscustomobject]@{
+        OldHome = $oldHome
+        NewHome = $targetHome
+        SettingsPath = Get-CrossAgnetCodingSettingsPath
+        Migrated = (-not $SwitchOnly)
+    }
+}
+
+function Get-ProjectGitRemote {
+    param([string]$ProjectPath)
+
+    if ([string]::IsNullOrWhiteSpace($ProjectPath) -or -not (Test-Path -LiteralPath $ProjectPath)) {
+        return ""
+    }
+
+    $git = Get-Command git -ErrorAction SilentlyContinue
+    if (-not $git) {
+        return ""
+    }
+
+    try {
+        $remote = & git -C $ProjectPath config --get remote.origin.url 2>$null
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($remote)) {
+            return ""
+        }
+        return ([string]$remote).Trim().ToLowerInvariant()
+    } catch {
+        return ""
+    }
+}
+
+function Get-WorkspaceId {
+    param([string]$ProjectPath)
+
+    if ([string]::IsNullOrWhiteSpace($ProjectPath)) {
+        $ProjectPath = (Get-Location).Path
+    }
+
+    $normalized = [System.IO.Path]::GetFullPath($ProjectPath).TrimEnd("\", "/").ToLowerInvariant()
+
+    # Workspace identity is the normalized project path plus the Git remote when
+    # available. The remote is appended only when present so that non-Git
+    # projects keep stable, path-only identifiers.
+    $identity = $normalized
+    $remote = Get-ProjectGitRemote -ProjectPath $ProjectPath
+    if (-not [string]::IsNullOrWhiteSpace($remote)) {
+        $identity = $normalized + "|" + $remote
+    }
+
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($identity)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hashBytes = $sha.ComputeHash($bytes)
+    } finally {
+        $sha.Dispose()
+    }
+
+    $hex = -join ($hashBytes | ForEach-Object { $_.ToString("x2") })
+    return $hex.Substring(0, 16)
+}
+
+function Get-WorkspacePath {
+    param([string]$ProjectPath)
+
+    return (Join-Path (Join-Path (Get-CrossAgnetCodingHome) "workspaces") (Get-WorkspaceId -ProjectPath $ProjectPath))
+}
+
+function Get-WorkspacePromptFileNames {
+    return @("AGENTS.md", "TRAE.md", "CLAUDE.md", "GEMINI.md", "OPENCODE.md", "OPENCLAW.md", "HERMES.md")
+}
+
+function Sync-WorkspacePromptFiles {
+    param([string]$ProjectPath)
+
+    $workspacePath = Get-WorkspacePath -ProjectPath $ProjectPath
+    if (-not (Test-Path -LiteralPath $workspacePath)) {
+        New-Item -ItemType Directory -Path $workspacePath -Force | Out-Null
+    }
+
+    $handoffPath = Join-Path $workspacePath "handoff.md"
+    $handoff = ""
+    if (Test-Path -LiteralPath $handoffPath) {
+        $handoff = Get-Content -LiteralPath $handoffPath -Raw -Encoding UTF8
+    }
+
+    $content = (Get-SharedPromptContent) + "`r`n`r`n## Workspace`r`nProject: $([System.IO.Path]::GetFullPath($ProjectPath))`r`nWorkspace ID: $(Get-WorkspaceId -ProjectPath $ProjectPath)`r`n`r`n## Latest Handoff`r`n$handoff"
+    $paths = New-Object System.Collections.Generic.List[string]
+    foreach ($name in Get-WorkspacePromptFileNames) {
+        $path = Join-Path $workspacePath $name
+        Set-Content -LiteralPath $path -Value $content -Encoding UTF8
+        [void]$paths.Add($path)
+    }
+
+    return @($paths)
+}
+
+function Initialize-WorkspaceMemory {
+    param([string]$ProjectPath)
+
+    if ([string]::IsNullOrWhiteSpace($ProjectPath)) {
+        $ProjectPath = (Get-Location).Path
+    }
+
+    $fullPath = [System.IO.Path]::GetFullPath($ProjectPath)
+    $workspacePath = Get-WorkspacePath -ProjectPath $fullPath
+    if (-not (Test-Path -LiteralPath $workspacePath)) {
+        New-Item -ItemType Directory -Path $workspacePath -Force | Out-Null
+    }
+
+    $workspace = [ordered]@{
+        id = Get-WorkspaceId -ProjectPath $fullPath
+        projectPath = $fullPath
+        updatedAt = (Get-Date).ToString("o")
+    }
+    $workspaceFile = Join-Path $workspacePath "workspace.json"
+    if (-not (Test-Path -LiteralPath $workspaceFile)) {
+        $workspace.createdAt = $workspace.updatedAt
+    } else {
+        try {
+            $existing = Get-Content -LiteralPath $workspaceFile -Raw -Encoding UTF8 | ConvertFrom-Json
+            $workspace.createdAt = $existing.createdAt
+        } catch {
+            $workspace.createdAt = $workspace.updatedAt
+        }
+    }
+
+    Set-Content -LiteralPath $workspaceFile -Value ($workspace | ConvertTo-Json -Depth 8) -Encoding UTF8
+    [void](Sync-WorkspacePromptFiles -ProjectPath $fullPath)
+
+    return [pscustomobject]@{
+        Id = $workspace.id
+        ProjectPath = $fullPath
+        WorkspacePath = $workspacePath
+        WorkspaceFile = $workspaceFile
+    }
+}
+
+function Add-SessionBridgeEntry {
+    param(
+        [string]$ProjectPath,
+        [string]$Tool,
+        [string]$Summary,
+        [string]$SourcePath = ""
+    )
+
+    $workspace = Initialize-WorkspaceMemory -ProjectPath $ProjectPath
+    $entry = [ordered]@{
+        timestamp = (Get-Date).ToString("o")
+        workspaceId = $workspace.Id
+        projectPath = $workspace.ProjectPath
+        tool = $Tool
+        sourcePath = $SourcePath
+        summary = $Summary
+    }
+
+    $sessionsPath = Join-Path $workspace.WorkspacePath "sessions.jsonl"
+    Add-Content -LiteralPath $sessionsPath -Value ($entry | ConvertTo-Json -Compress -Depth 8) -Encoding UTF8
+
+    $handoff = @"
+# CrossAgnetCoding Workspace Handoff
+
+Project: $($workspace.ProjectPath)
+Workspace ID: $($workspace.Id)
+Updated: $($entry.timestamp)
+Tool: $Tool
+Source: $SourcePath
+
+$Summary
+"@
+    Set-Content -LiteralPath (Join-Path $workspace.WorkspacePath "handoff.md") -Value $handoff -Encoding UTF8
+    [void](Sync-WorkspacePromptFiles -ProjectPath $workspace.ProjectPath)
+    return $sessionsPath
+}
+
+function Get-BoundedTextFiles {
+    param(
+        [string[]]$Roots,
+        [int]$MaxFiles = 20,
+        [int]$MaxBytes = 4000
+    )
+
+    $items = New-Object System.Collections.Generic.List[object]
+    foreach ($root in $Roots) {
+        if (-not (Test-Path -LiteralPath $root)) {
+            continue
+        }
+
+        Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Length -gt 0 -and $_.Length -le 1048576 -and $_.Extension -match "(\.jsonl|\.json|\.md|\.txt|\.log)$" } |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First $MaxFiles |
+            ForEach-Object {
+                if ($items.Count -lt $MaxFiles) {
+                    $text = ""
+                    try {
+                        $text = Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 -ErrorAction Stop
+                    } catch {
+                        $text = ""
+                    }
+                    if ($text.Length -gt $MaxBytes) {
+                        $text = $text.Substring(0, $MaxBytes)
+                    }
+                    [void]$items.Add([pscustomobject]@{
+                        Path = $_.FullName
+                        Text = $text
+                    })
+                }
+            }
+    }
+
+    return $items.ToArray()
+}
+
+function Get-CodexSessionRoots {
+    $codexHome = Split-Path -Parent (Get-CodexConfigPath)
+    return @((Join-Path $codexHome "sessions"))
+}
+
+function Get-TraeDataRoots {
+    return @(
+        (Join-Path $env:APPDATA "TRAE SOLO CN"),
+        (Join-Path $env:APPDATA "TRAE SOLO")
+    )
+}
+
+function Import-CodexSessionBridge {
+    param([string]$ProjectPath)
+
+    $files = @(Get-BoundedTextFiles -Roots (Get-CodexSessionRoots) -MaxFiles 12 -MaxBytes 3000)
+    if ($files.Count -eq 0) {
+        return (Add-SessionBridgeEntry -ProjectPath $ProjectPath -Tool "Codex" -Summary "No readable Codex session files were found for bridge import." -SourcePath "")
+    }
+
+    $summary = "Imported Codex session snippets:`r`n" + (($files | ForEach-Object { "- $($_.Path)`r`n$($_.Text)" }) -join "`r`n")
+    return (Add-SessionBridgeEntry -ProjectPath $ProjectPath -Tool "Codex" -Summary $summary -SourcePath ($files[0].Path))
+}
+
+function Import-TraeSessionBridge {
+    param([string]$ProjectPath)
+
+    $roots = Get-TraeDataRoots | ForEach-Object { Join-Path $_ "logs" }
+    $files = @(Get-BoundedTextFiles -Roots $roots -MaxFiles 12 -MaxBytes 3000)
+    if ($files.Count -eq 0) {
+        return (Add-SessionBridgeEntry -ProjectPath $ProjectPath -Tool "TRAE" -Summary "No readable TRAE session or log files were found for bridge import." -SourcePath "")
+    }
+
+    $summary = "Imported TRAE session/log snippets:`r`n" + (($files | ForEach-Object { "- $($_.Path)`r`n$($_.Text)" }) -join "`r`n")
+    return (Add-SessionBridgeEntry -ProjectPath $ProjectPath -Tool "TRAE" -Summary $summary -SourcePath ($files[0].Path))
 }
 
 function Get-SharedPromptContent {
@@ -531,7 +1253,10 @@ function Sync-SharedAgentFiles {
         (Join-Path $sharedDir "AGENTS.md"),
         (Join-Path $sharedDir "CLAUDE.md"),
         (Join-Path $sharedDir "OPENCODE.md"),
-        (Join-Path $sharedDir "TRAE.md")
+        (Join-Path $sharedDir "TRAE.md"),
+        (Join-Path $sharedDir "GEMINI.md"),
+        (Join-Path $sharedDir "OPENCLAW.md"),
+        (Join-Path $sharedDir "HERMES.md")
     )
 
     foreach ($path in $paths) {
@@ -594,6 +1319,132 @@ function Invoke-HiddenProcess {
     }
 }
 
+function Write-CliHelp {
+    Write-Output "CrossAgnetCoding CLI MVP"
+    Write-Output "Commands:"
+    Write-Output "  env tools                       Check local tools and service"
+    Write-Output "  agents scan                     List agent connection status"
+    Write-Output "  agents configure                Auto-configure AgentMemory MCP"
+    Write-Output "  workspace init [path]           Initialize workspace memory"
+    Write-Output "  workspace bridge [path]         Import Codex/TRAE bridge summaries"
+    Write-Output "  config home                     Show CrossAgnetCoding data directory"
+    Write-Output "  config migrate <path>           Migrate data directory"
+}
+
+function Get-CliArgsFromInvocationLine {
+    param([string]$Line)
+
+    if ([string]::IsNullOrWhiteSpace($Line)) {
+        return @()
+    }
+
+    $match = [regex]::Match($Line, "(?i)\s-Cli\s+(?<tail>.+)$")
+    if (-not $match.Success) {
+        return @()
+    }
+
+    $tail = $match.Groups["tail"].Value.Trim()
+    if ([string]::IsNullOrWhiteSpace($tail)) {
+        return @()
+    }
+
+    $matches = [regex]::Matches($tail, '"([^"]+)"|''([^'']+)''|(\S+)')
+    return @($matches | ForEach-Object {
+        if ($_.Groups[1].Success) { $_.Groups[1].Value }
+        elseif ($_.Groups[2].Success) { $_.Groups[2].Value }
+        else { $_.Groups[3].Value }
+    })
+}
+
+function Invoke-CliMode {
+    param([string[]]$CliArgs)
+
+    $script:CliExitCode = 0
+    if ($CliArgs.Count -eq 0) {
+        Write-CliHelp
+        return
+    }
+
+    $command = (($CliArgs -join " ")).ToLowerInvariant()
+    if ($command -eq "env tools") {
+        $status = Get-EnvironmentStatus
+        Write-Output "Node: $($status.Node) $($status.NodeVersion)"
+        Write-Output "AgentMemory: $($status.AgentMemory)"
+        Write-Output "iii-engine: $($status.Iii)"
+        Write-Output "Service: $($status.Service)"
+        return
+    } elseif ($command -eq "agents scan") {
+        Get-AgentClientStatuses | ForEach-Object {
+            Write-Output "$($_.Id)`t$($_.Name)`tinstalled=$($_.Installed)`tconfigured=$($_.Configured)`tpath=$($_.ConfigPath)"
+        }
+        return
+    } elseif ($command -eq "agents configure") {
+        Configure-AllAgentClients | ForEach-Object { Write-Output "configured: $_" }
+        return
+    } elseif ($command -match "^workspace init") {
+        $projectPath = if ($CliArgs.Count -ge 3) { $CliArgs[2] } else { (Get-Location).Path }
+        $workspace = Initialize-WorkspaceMemory -ProjectPath $projectPath
+        Write-Output "workspace: $($workspace.Id)"
+        Write-Output "path: $($workspace.WorkspacePath)"
+        return
+    } elseif ($command -match "^workspace bridge") {
+        $projectPath = if ($CliArgs.Count -ge 3) { $CliArgs[2] } else { (Get-Location).Path }
+        [void](Import-CodexSessionBridge -ProjectPath $projectPath)
+        [void](Import-TraeSessionBridge -ProjectPath $projectPath)
+        $workspace = Initialize-WorkspaceMemory -ProjectPath $projectPath
+        Write-Output "bridge imported: $($workspace.WorkspacePath)"
+        return
+    } elseif ($command -eq "config home") {
+        Write-Output (Get-CrossAgnetCodingHome)
+        return
+    } elseif ($command -match "^config migrate ") {
+        if ($CliArgs.Count -lt 3) {
+            Write-Error "config migrate requires a target path"
+            $script:CliExitCode = 2
+            return
+        }
+        $result = Move-CrossAgnetCodingHome -NewHome $CliArgs[2]
+        Write-Output "migrated: $($result.NewHome)"
+        return
+    }
+
+    Write-CliHelp
+    $script:CliExitCode = 2
+}
+
+function Invoke-TuiMode {
+    while ($true) {
+        Write-Host ""
+        Write-Host "CrossAgnetCoding TUI MVP"
+        Write-Host "1. env tools"
+        Write-Host "2. agents scan"
+        Write-Host "3. agents configure"
+        Write-Host "4. workspace init"
+        Write-Host "5. workspace bridge"
+        Write-Host "6. config home"
+        Write-Host "0. exit"
+        $choice = Read-Host "Select"
+        switch ($choice) {
+            "1" { [void](Invoke-CliMode -CliArgs @("env", "tools")) }
+            "2" { [void](Invoke-CliMode -CliArgs @("agents", "scan")) }
+            "3" { [void](Invoke-CliMode -CliArgs @("agents", "configure")) }
+            "4" {
+                $path = Read-Host "Workspace path (blank for current)"
+                if ([string]::IsNullOrWhiteSpace($path)) { $path = (Get-Location).Path }
+                [void](Invoke-CliMode -CliArgs @("workspace", "init", $path))
+            }
+            "5" {
+                $path = Read-Host "Workspace path (blank for current)"
+                if ([string]::IsNullOrWhiteSpace($path)) { $path = (Get-Location).Path }
+                [void](Invoke-CliMode -CliArgs @("workspace", "bridge", $path))
+            }
+            "6" { [void](Invoke-CliMode -CliArgs @("config", "home")) }
+            "0" { return 0 }
+            default { Write-Host "Unknown choice" }
+        }
+    }
+}
+
 if ($SelfTest) {
     $ErrorActionPreference = "Stop"
     $errors = New-Object System.Collections.Generic.List[string]
@@ -615,15 +1466,26 @@ if ($SelfTest) {
         [void]$errors.Add("MCP config missing agentmemory")
     }
 
+    $targets = @(Get-AgentTargetDefinitions)
+    foreach ($id in @("codex", "trae-cn", "trae", "claude-code", "claude-desktop", "gemini", "opencode", "openclaw", "hermes")) {
+        if (-not ($targets | Where-Object { $_.Id -eq $id })) {
+            [void]$errors.Add("Missing target definition: $id")
+        }
+    }
+
+    if ($targets.Count -lt 9) {
+        [void]$errors.Add("Expected at least 9 target definitions")
+    }
+
     $clients = @(Get-AgentClientStatuses)
-    foreach ($id in @("codex", "trae", "opencode", "claude")) {
+    foreach ($id in @("codex", "trae-cn", "trae", "claude-code", "claude-desktop", "gemini", "opencode", "openclaw", "hermes")) {
         if (-not ($clients | Where-Object { $_.Id -eq $id })) {
             [void]$errors.Add("Missing client definition: $id")
         }
     }
 
     $cliCommands = Get-CliConfigCommands
-    foreach ($needle in @("claude mcp add-json", "Codex", "TRAE SOLO CN", "OpenCode", "localhost:3111")) {
+    foreach ($needle in @("claude mcp add-json", "Codex", "TRAE SOLO CN", "TRAE SOLO", "Gemini CLI", "OpenCode", "OpenClaw", "Hermes", "localhost:3111")) {
         if ($cliCommands -notmatch [regex]::Escape($needle)) {
             [void]$errors.Add("CLI commands missing: $needle")
         }
@@ -638,10 +1500,28 @@ if ($SelfTest) {
         [void]$errors.Add("Shared prompt missing AgentMemory endpoint")
     }
 
+    # Codex config path must follow CODEX_HOME when it points to an existing
+    # directory. The write-test path forces the default location, so this branch
+    # is only meaningful outside write-test mode.
+    if ($env:AM_MANAGER_WRITE_TEST -ne "1") {
+        $codexHomeDir = Join-Path $env:TEMP ("cac-codexhome-" + [guid]::NewGuid().ToString("N"))
+        New-Item -ItemType Directory -Path $codexHomeDir -Force | Out-Null
+        $oldCodexHome = $env:CODEX_HOME
+        try {
+            $env:CODEX_HOME = $codexHomeDir
+            if ((Get-CodexConfigPath) -ne (Join-Path $codexHomeDir "config.toml")) {
+                [void]$errors.Add("Codex config path did not follow CODEX_HOME")
+            }
+        } finally {
+            $env:CODEX_HOME = $oldCodexHome
+            Remove-Item -LiteralPath $codexHomeDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
     if ($env:AM_MANAGER_WRITE_TEST -eq "1") {
         $paths = @(Configure-AllAgentClients)
-        if ($paths.Count -ne 4) {
-            [void]$errors.Add("Expected 4 config paths from Configure-AllAgentClients")
+        if ($paths.Count -lt 8) {
+            [void]$errors.Add("Expected at least 8 config paths from Configure-AllAgentClients")
         }
         foreach ($path in $paths) {
             if (-not (Test-Path -LiteralPath $path)) {
@@ -655,13 +1535,80 @@ if ($SelfTest) {
         }
 
         $sharedPaths = @(Sync-SharedAgentFiles)
-        if ($sharedPaths.Count -ne 4) {
-            [void]$errors.Add("Expected 4 shared agent files")
+        if ($sharedPaths.Count -ne 7) {
+            [void]$errors.Add("Expected 7 shared agent files")
         }
         foreach ($path in $sharedPaths) {
             if (-not (Test-Path -LiteralPath $path)) {
                 [void]$errors.Add("Shared file writer did not create: $path")
             }
+        }
+
+        $projectDir = Join-Path $env:USERPROFILE "sample-project"
+        New-Item -ItemType Directory -Path $projectDir -Force | Out-Null
+        $workspaceA = Initialize-WorkspaceMemory -ProjectPath $projectDir
+        $workspaceB = Initialize-WorkspaceMemory -ProjectPath $projectDir
+        if ($workspaceA.Id -ne $workspaceB.Id) {
+            [void]$errors.Add("Workspace ID is not stable")
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $workspaceA.WorkspacePath "workspace.json"))) {
+            [void]$errors.Add("Workspace metadata missing")
+        }
+
+        # When a Git remote is present, it must contribute to the workspace
+        # identity so different repositories at the same path stay distinct.
+        if (Get-Command git -ErrorAction SilentlyContinue) {
+            $gitProject = Join-Path $env:USERPROFILE "git-sample-project"
+            New-Item -ItemType Directory -Path $gitProject -Force | Out-Null
+            & git -C $gitProject init --quiet 2>$null | Out-Null
+            $idBeforeRemote = Get-WorkspaceId -ProjectPath $gitProject
+            & git -C $gitProject remote add origin "https://example.com/crossagnetcoding.git" 2>$null | Out-Null
+            $idAfterRemote = Get-WorkspaceId -ProjectPath $gitProject
+            if ($idBeforeRemote -eq $idAfterRemote) {
+                [void]$errors.Add("Workspace ID did not incorporate Git remote")
+            }
+            if ((Get-WorkspaceId -ProjectPath $gitProject) -ne $idAfterRemote) {
+                [void]$errors.Add("Workspace ID with Git remote is not stable")
+            }
+        }
+
+        $bridgePath = Add-SessionBridgeEntry -ProjectPath $projectDir -Tool "Codex" -Summary "Implemented parser and ran tests." -SourcePath "codex-session.jsonl"
+        if (-not (Test-Path -LiteralPath $bridgePath)) {
+            [void]$errors.Add("Session bridge file missing")
+        }
+        $handoffPath = Join-Path $workspaceA.WorkspacePath "handoff.md"
+        if (-not ((Get-Content -LiteralPath $handoffPath -Raw -Encoding UTF8) -match "Implemented parser")) {
+            [void]$errors.Add("Handoff summary missing bridge text")
+        }
+
+        $codexSessionDir = Join-Path (Split-Path -Parent (Get-CodexConfigPath)) "sessions\2026"
+        New-Item -ItemType Directory -Path $codexSessionDir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $codexSessionDir "sample.jsonl") -Value '{"message":"Codex worked on routing"}' -Encoding UTF8
+        [void](Import-CodexSessionBridge -ProjectPath $projectDir)
+
+        $traeLogDir = Join-Path $env:APPDATA "TRAE SOLO CN\logs"
+        New-Item -ItemType Directory -Path $traeLogDir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $traeLogDir "sample.log") -Value "TRAE completed UI review" -Encoding UTF8
+        [void](Import-TraeSessionBridge -ProjectPath $projectDir)
+
+        $sessionLines = @(Get-Content -LiteralPath $bridgePath -Encoding UTF8)
+        if ($sessionLines.Count -lt 3) {
+            [void]$errors.Add("Expected bridge entries from manual, Codex, and TRAE imports")
+        }
+
+        $oldHome = Get-CrossAgnetCodingHome
+        $markerPath = Join-Path $oldHome "migration-marker.txt"
+        if (-not (Test-Path -LiteralPath $oldHome)) {
+            New-Item -ItemType Directory -Path $oldHome -Force | Out-Null
+        }
+        Set-Content -LiteralPath $markerPath -Value "keep me" -Encoding UTF8
+        $newHome = Join-Path $env:TEMP ("crossagnetcoding-home-" + [guid]::NewGuid().ToString("N"))
+        $migration = Move-CrossAgnetCodingHome -NewHome $newHome
+        if ((Get-CrossAgnetCodingHome) -ne $migration.NewHome) {
+            [void]$errors.Add("CrossAgnetCoding home did not switch after migration")
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $newHome "migration-marker.txt"))) {
+            [void]$errors.Add("Migration did not copy existing data")
         }
     }
 
@@ -672,6 +1619,25 @@ if ($SelfTest) {
 
     Write-Output "SELFTEST OK"
     exit 0
+}
+
+if ($Cli) {
+    $effectiveCommandArgs = @($CommandArgs)
+    if ($effectiveCommandArgs.Count -eq 0 -and $MyInvocation.UnboundArguments.Count -gt 0) {
+        $effectiveCommandArgs = @($MyInvocation.UnboundArguments)
+    }
+    if ($effectiveCommandArgs.Count -gt 0 -and $effectiveCommandArgs[0] -match "^-Cli$") {
+        $effectiveCommandArgs = @($effectiveCommandArgs | Select-Object -Skip 1)
+    }
+    if ($effectiveCommandArgs.Count -eq 0) {
+        $effectiveCommandArgs = @(Get-CliArgsFromInvocationLine -Line $MyInvocation.Line)
+    }
+    Invoke-CliMode -CliArgs $effectiveCommandArgs
+    exit $script:CliExitCode
+}
+
+if ($Tui) {
+    exit (Invoke-TuiMode)
 }
 
 function Write-Log {
@@ -707,27 +1673,43 @@ function Set-Busy {
     $script:BtnConfigureAgents.Enabled = -not $Busy
     $script:BtnCopyCli.Enabled = -not $Busy
     $script:BtnSyncShared.Enabled = -not $Busy
+    $script:BtnWorkspaceBridge.Enabled = -not $Busy
+    $script:BtnMigrateHome.Enabled = -not $Busy
     $script:LanguageBox.Enabled = -not $Busy
     [System.Windows.Forms.Application]::DoEvents()
 }
 
 function Apply-Language {
     $script:Form.Text = T "WindowTitle"
-    $script:TitleLabel.Text = T "Title"
-    $script:EnvGroup.Text = T "EnvCheck"
-    $script:ServiceGroup.Text = T "ServiceStatus"
+    $script:TitleLabel.Text = T "SettingsTitle"
+    $script:AboutHeadingLabel.Text = T "AICodeToolAbout"
+    $script:AboutDescriptionLabel.Text = T "AboutDescription"
+    $script:ProductNameLabel.Text = "CrossAgnetCoding"
+    $script:ProductVersionLabel.Text = "Version $script:APP_VERSION"
+    $script:LocalEnvLabel.Text = T "LocalEnvCheck"
     $script:ActionGroup.Text = T "LastAction"
     $script:BtnInstall.Text = T "InstallAll"
     $script:BtnStart.Text = T "StartService"
     $script:BtnStop.Text = T "StopService"
     $script:BtnMcp.Text = T "CopyMcp"
-    $script:AgentGroup.Text = T "CodingAgentAccess"
     $script:BtnScanAgents.Text = T "ScanAgents"
-    $script:BtnConfigureAgents.Text = T "ConfigureAgents"
+    $script:BtnConfigureAgents.Text = T "ConfigureAll"
+    $script:BtnUpgradeAll.Text = T "UpgradeAll"
     $script:BtnCopyCli.Text = T "CopyCli"
     $script:BtnSyncShared.Text = T "SyncSharedFiles"
+    $script:BtnWorkspaceBridge.Text = T "BridgeWorkspace"
+    $script:BtnMigrateHome.Text = T "MigrateDataHome"
     $script:LogGroup.Text = T "Log"
+    if ($script:NavButtons -and $script:NavButtons.Count -eq 6) {
+        $script:NavButtons[0].Text = T "GeneralTab"
+        $script:NavButtons[1].Text = T "RouteTab"
+        $script:NavButtons[2].Text = T "AuthTab"
+        $script:NavButtons[3].Text = T "AdvancedTab"
+        $script:NavButtons[4].Text = T "UsageTab"
+        $script:NavButtons[5].Text = T "AboutTab"
+    }
     Update-Status
+    Update-ToolCardControls
 }
 
 function Update-Status {
@@ -784,6 +1766,11 @@ function Get-AgentStatusDisplayText {
 }
 
 function Update-AgentClientStatus {
+    if ($null -ne $script:ToolCardControls -and $script:ToolCardControls.Count -gt 0) {
+        Update-ToolCardControls
+        return
+    }
+
     $clients = @(Get-AgentClientStatuses)
     for ($i = 0; $i -lt $script:AgentLabels.Count; $i++) {
         $client = $clients[$i]
@@ -1077,18 +2064,262 @@ function Sync-SharedFilesFromUi {
     }
 }
 
+function Bridge-WorkspaceFromUi {
+    $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+    $dialog.Description = T "BridgeWorkspacePrompt"
+    $dialog.ShowNewFolderButton = $false
+    $dialog.SelectedPath = (Get-Location).Path
+
+    try {
+        if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+            return
+        }
+
+        Set-Busy $true
+        $projectPath = $dialog.SelectedPath
+        [void](Import-CodexSessionBridge -ProjectPath $projectPath)
+        [void](Import-TraeSessionBridge -ProjectPath $projectPath)
+        $workspace = Initialize-WorkspaceMemory -ProjectPath $projectPath
+        Write-Log "Workspace bridge: $($workspace.WorkspacePath)"
+        Set-ActionFeedback (T "BridgeWorkspaceDone" @($workspace.WorkspacePath)) ([System.Drawing.Color]::DarkGreen)
+        [System.Windows.Forms.MessageBox]::Show((T "BridgeWorkspaceDone" @($workspace.WorkspacePath)), (T "BridgeWorkspaceTitle"), "OK", "Information") | Out-Null
+    } catch {
+        Set-ActionFeedback $_.Exception.Message ([System.Drawing.Color]::Red)
+        Write-Log $_.Exception.Message
+        [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, "CrossAgnetCoding", "OK", "Error") | Out-Null
+    } finally {
+        Set-Busy $false
+        $dialog.Dispose()
+    }
+}
+
+function Migrate-DataHomeFromUi {
+    $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+    $dialog.Description = T "MigrateDataPrompt"
+    $dialog.ShowNewFolderButton = $true
+    $dialog.SelectedPath = Get-CrossAgnetCodingHome
+
+    try {
+        if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) {
+            return
+        }
+
+        Set-Busy $true
+        $result = Move-CrossAgnetCodingHome -NewHome $dialog.SelectedPath
+        Write-Log "Data home: $($result.NewHome)"
+        Set-ActionFeedback (T "MigrateDataDone" @($result.NewHome)) ([System.Drawing.Color]::DarkGreen)
+        [System.Windows.Forms.MessageBox]::Show((T "MigrateDataDone" @($result.NewHome)), (T "MigrateDataTitle"), "OK", "Information") | Out-Null
+        [void](Sync-SharedAgentFiles)
+    } catch {
+        Set-ActionFeedback $_.Exception.Message ([System.Drawing.Color]::Red)
+        Write-Log $_.Exception.Message
+        [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, "CrossAgnetCoding", "OK", "Error") | Out-Null
+    } finally {
+        Set-Busy $false
+        $dialog.Dispose()
+    }
+}
+
+function Configure-AgentToolFromUi {
+    param([string]$TargetId)
+
+    Set-Busy $true
+    try {
+        $target = @(Get-AgentTargetDefinitions | Where-Object { $_.Id -eq $TargetId } | Select-Object -First 1)
+        if ($target.Count -eq 0) {
+            throw "Unknown tool target: $TargetId"
+        }
+
+        $actionName = [string]$target[0].ConfigureAction
+        $path = & $actionName
+        Write-Log "MCP config: $path"
+        Update-AgentClientStatus
+        Set-ActionFeedback (T "ToolConfigureDone" @($target[0].Name)) ([System.Drawing.Color]::DarkGreen)
+    } catch {
+        Set-ActionFeedback $_.Exception.Message ([System.Drawing.Color]::Red)
+        Write-Log $_.Exception.Message
+        [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, "CrossAgnetCoding", "OK", "Error") | Out-Null
+    } finally {
+        Set-Busy $false
+    }
+}
+
+function New-CardLabel {
+    param(
+        [string]$Text,
+        [int]$X,
+        [int]$Y,
+        [int]$Width,
+        [int]$Height,
+        [float]$Size = 8.5,
+        [System.Drawing.FontStyle]$Style = [System.Drawing.FontStyle]::Regular
+    )
+
+    $label = New-Object System.Windows.Forms.Label
+    $label.Text = $Text
+    $label.Location = New-Object System.Drawing.Point($X, $Y)
+    $label.Size = New-Object System.Drawing.Size($Width, $Height)
+    $label.Font = New-Object System.Drawing.Font("Segoe UI", $Size, $Style)
+    $label.AutoEllipsis = $true
+    return $label
+}
+
+function New-FlatButton {
+    param(
+        [string]$Text,
+        [int]$X,
+        [int]$Y,
+        [int]$Width,
+        [int]$Height,
+        [switch]$Primary
+    )
+
+    $button = New-Object System.Windows.Forms.Button
+    $button.Text = $Text
+    $button.Location = New-Object System.Drawing.Point($X, $Y)
+    $button.Size = New-Object System.Drawing.Size($Width, $Height)
+    $button.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+    $button.Font = New-Object System.Drawing.Font("Segoe UI", 8)
+    if ($Primary) {
+        $button.BackColor = [System.Drawing.Color]::FromArgb(24, 144, 255)
+        $button.ForeColor = [System.Drawing.Color]::White
+    } else {
+        $button.BackColor = [System.Drawing.Color]::White
+        $button.ForeColor = [System.Drawing.Color]::FromArgb(55, 65, 81)
+    }
+    return $button
+}
+
+function New-ToolCardControl {
+    param(
+        [object]$Card,
+        [int]$X,
+        [int]$Y
+    )
+
+    $panel = New-Object System.Windows.Forms.Panel
+    $panel.Size = New-Object System.Drawing.Size(350, 156)
+    $panel.Location = New-Object System.Drawing.Point($X, $Y)
+    $panel.BackColor = [System.Drawing.Color]::White
+    $panel.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+
+    $nameLabel = New-CardLabel -Text $Card.Name -X 18 -Y 16 -Width 200 -Height 24 -Size 9.5 -Style ([System.Drawing.FontStyle]::Bold)
+    $panel.Controls.Add($nameLabel)
+
+    $platformLabel = New-CardLabel -Text $Card.Platform -X 18 -Y 42 -Width 46 -Height 22 -Size 8
+    $platformLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
+    $platformLabel.BackColor = [System.Drawing.Color]::FromArgb(230, 244, 255)
+    $platformLabel.ForeColor = [System.Drawing.Color]::FromArgb(22, 119, 255)
+    $panel.Controls.Add($platformLabel)
+
+    $installLabel = New-CardLabel -Text $Card.InstallStatus -X 245 -Y 18 -Width 82 -Height 22 -Size 8.5
+    $installLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
+    $panel.Controls.Add($installLabel)
+
+    $currentTitle = New-CardLabel -Text (T "CurrentVersion") -X 18 -Y 76 -Width 84 -Height 20 -Size 8
+    $currentTitle.ForeColor = [System.Drawing.Color]::FromArgb(107, 114, 128)
+    $panel.Controls.Add($currentTitle)
+
+    $currentValue = New-CardLabel -Text $Card.CurrentVersion -X 212 -Y 76 -Width 116 -Height 20 -Size 8
+    $currentValue.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
+    $panel.Controls.Add($currentValue)
+
+    $latestTitle = New-CardLabel -Text (T "LatestVersion") -X 18 -Y 98 -Width 84 -Height 20 -Size 8
+    $latestTitle.ForeColor = [System.Drawing.Color]::FromArgb(107, 114, 128)
+    $panel.Controls.Add($latestTitle)
+
+    $latestValue = New-CardLabel -Text $Card.LatestVersion -X 212 -Y 98 -Width 116 -Height 20 -Size 8
+    $latestValue.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
+    $panel.Controls.Add($latestValue)
+
+    $detailLabel = New-CardLabel -Text $Card.Detail -X 18 -Y 122 -Width 210 -Height 20 -Size 8
+    $detailLabel.ForeColor = [System.Drawing.Color]::FromArgb(107, 114, 128)
+    $panel.Controls.Add($detailLabel)
+
+    $actionButton = New-FlatButton -Text $Card.ActionText -X 248 -Y 120 -Width 80 -Height 26
+    $actionButton.Tag = $Card.Id
+    $actionButton.Add_Click({ Configure-AgentToolFromUi -TargetId ([string]$this.Tag) })
+    $panel.Controls.Add($actionButton)
+
+    return [pscustomobject]@{
+        Id = $Card.Id
+        Panel = $panel
+        NameLabel = $nameLabel
+        PlatformLabel = $platformLabel
+        InstallLabel = $installLabel
+        CurrentTitle = $currentTitle
+        CurrentValue = $currentValue
+        LatestTitle = $latestTitle
+        LatestValue = $latestValue
+        DetailLabel = $detailLabel
+        ActionButton = $actionButton
+    }
+}
+
+function Update-ToolCardControls {
+    if ($null -eq $script:ToolCardControls) {
+        return
+    }
+
+    $cards = @{}
+    foreach ($card in Get-AgentToolCards) {
+        $cards[$card.Id] = $card
+    }
+
+    foreach ($control in $script:ToolCardControls) {
+        if (-not $cards.ContainsKey($control.Id)) {
+            continue
+        }
+
+        $card = $cards[$control.Id]
+        $control.NameLabel.Text = $card.Name
+        $control.PlatformLabel.Text = $card.Platform
+        $control.InstallLabel.Text = $card.InstallStatus
+        $control.CurrentTitle.Text = T "CurrentVersion"
+        $control.CurrentValue.Text = $card.CurrentVersion
+        $control.LatestTitle.Text = T "LatestVersion"
+        $control.LatestValue.Text = $card.LatestVersion
+        $control.DetailLabel.Text = $card.Detail
+        $control.ActionButton.Text = $card.ActionText
+
+        if ($card.Configured) {
+            $control.InstallLabel.ForeColor = [System.Drawing.Color]::FromArgb(22, 163, 74)
+        } elseif ($card.Installed) {
+            $control.InstallLabel.ForeColor = [System.Drawing.Color]::FromArgb(217, 119, 6)
+        } else {
+            $control.InstallLabel.ForeColor = [System.Drawing.Color]::FromArgb(107, 114, 128)
+        }
+    }
+
+    [System.Windows.Forms.Application]::DoEvents()
+}
+
 $script:Form = New-Object System.Windows.Forms.Form
-$script:Form.Size = New-Object System.Drawing.Size(620, 760)
+$script:Form.Size = New-Object System.Drawing.Size(1180, 900)
 $script:Form.StartPosition = "CenterScreen"
 $script:Form.FormBorderStyle = "FixedSingle"
 $script:Form.MaximizeBox = $false
-$script:Form.BackColor = [System.Drawing.Color]::White
+$script:Form.BackColor = [System.Drawing.Color]::FromArgb(250, 250, 250)
+
+$script:HeaderPanel = New-Object System.Windows.Forms.Panel
+$script:HeaderPanel.Size = New-Object System.Drawing.Size(1164, 78)
+$script:HeaderPanel.Location = New-Object System.Drawing.Point(0, 0)
+$script:HeaderPanel.BackColor = [System.Drawing.Color]::White
+$script:Form.Controls.Add($script:HeaderPanel)
+
+$script:BackButton = New-FlatButton -Text "<" -X 24 -Y 20 -Width 38 -Height 34
+$script:BackButton.Add_Click({
+    Update-Status
+    Update-AgentClientStatus
+    Set-ActionFeedback (T "Ready")
+})
+$script:HeaderPanel.Controls.Add($script:BackButton)
 
 $script:TitleLabel = New-Object System.Windows.Forms.Label
-$script:TitleLabel.Font = New-Object System.Drawing.Font("Segoe UI", 14, [System.Drawing.FontStyle]::Bold)
-$script:TitleLabel.Size = New-Object System.Drawing.Size(430, 34)
-$script:TitleLabel.Location = New-Object System.Drawing.Point(20, 14)
-$script:Form.Controls.Add($script:TitleLabel)
+$script:TitleLabel.Font = New-Object System.Drawing.Font("Segoe UI", 13, [System.Drawing.FontStyle]::Bold)
+$script:TitleLabel.Size = New-Object System.Drawing.Size(240, 34)
+$script:TitleLabel.Location = New-Object System.Drawing.Point(76, 23)
+$script:HeaderPanel.Controls.Add($script:TitleLabel)
 
 $script:LanguageBox = New-Object System.Windows.Forms.ComboBox
 $script:LanguageBox.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
@@ -1096,125 +2327,134 @@ $script:LanguageBox.Items.Add("中文") | Out-Null
 $script:LanguageBox.Items.Add("English") | Out-Null
 $script:LanguageBox.SelectedIndex = 0
 $script:LanguageBox.Size = New-Object System.Drawing.Size(110, 26)
-$script:LanguageBox.Location = New-Object System.Drawing.Point(480, 17)
-$script:Form.Controls.Add($script:LanguageBox)
+$script:LanguageBox.Location = New-Object System.Drawing.Point(1024, 24)
+$script:HeaderPanel.Controls.Add($script:LanguageBox)
 
-$script:EnvGroup = New-Object System.Windows.Forms.GroupBox
-$script:EnvGroup.Size = New-Object System.Drawing.Size(570, 112)
-$script:EnvGroup.Location = New-Object System.Drawing.Point(20, 58)
-$script:Form.Controls.Add($script:EnvGroup)
+$script:NavPanel = New-Object System.Windows.Forms.Panel
+$script:NavPanel.Size = New-Object System.Drawing.Size(1120, 44)
+$script:NavPanel.Location = New-Object System.Drawing.Point(22, 88)
+$script:NavPanel.BackColor = [System.Drawing.Color]::White
+$script:NavPanel.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+$script:Form.Controls.Add($script:NavPanel)
 
-$script:NodeLabel = New-Object System.Windows.Forms.Label
-$script:NodeLabel.Size = New-Object System.Drawing.Size(535, 24)
-$script:NodeLabel.Location = New-Object System.Drawing.Point(14, 24)
-$script:NodeLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-$script:EnvGroup.Controls.Add($script:NodeLabel)
-
-$script:AgentMemoryLabel = New-Object System.Windows.Forms.Label
-$script:AgentMemoryLabel.Size = New-Object System.Drawing.Size(535, 24)
-$script:AgentMemoryLabel.Location = New-Object System.Drawing.Point(14, 52)
-$script:AgentMemoryLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-$script:EnvGroup.Controls.Add($script:AgentMemoryLabel)
-
-$script:IiiLabel = New-Object System.Windows.Forms.Label
-$script:IiiLabel.Size = New-Object System.Drawing.Size(535, 24)
-$script:IiiLabel.Location = New-Object System.Drawing.Point(14, 80)
-$script:IiiLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-$script:EnvGroup.Controls.Add($script:IiiLabel)
-
-$script:ServiceGroup = New-Object System.Windows.Forms.GroupBox
-$script:ServiceGroup.Size = New-Object System.Drawing.Size(570, 58)
-$script:ServiceGroup.Location = New-Object System.Drawing.Point(20, 180)
-$script:Form.Controls.Add($script:ServiceGroup)
-
-$script:ServiceLabel = New-Object System.Windows.Forms.Label
-$script:ServiceLabel.Size = New-Object System.Drawing.Size(535, 28)
-$script:ServiceLabel.Location = New-Object System.Drawing.Point(14, 22)
-$script:ServiceLabel.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
-$script:ServiceGroup.Controls.Add($script:ServiceLabel)
-
-$script:BtnInstall = New-Object System.Windows.Forms.Button
-$script:BtnInstall.Size = New-Object System.Drawing.Size(175, 42)
-$script:BtnInstall.Location = New-Object System.Drawing.Point(20, 252)
-$script:BtnInstall.BackColor = [System.Drawing.Color]::FromArgb(33, 150, 243)
-$script:BtnInstall.ForeColor = [System.Drawing.Color]::White
-$script:BtnInstall.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$script:BtnInstall.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
-$script:Form.Controls.Add($script:BtnInstall)
-
-$script:BtnStart = New-Object System.Windows.Forms.Button
-$script:BtnStart.Size = New-Object System.Drawing.Size(175, 42)
-$script:BtnStart.Location = New-Object System.Drawing.Point(217, 252)
-$script:BtnStart.BackColor = [System.Drawing.Color]::FromArgb(76, 175, 80)
-$script:BtnStart.ForeColor = [System.Drawing.Color]::White
-$script:BtnStart.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$script:BtnStart.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
-$script:Form.Controls.Add($script:BtnStart)
-
-$script:BtnStop = New-Object System.Windows.Forms.Button
-$script:BtnStop.Size = New-Object System.Drawing.Size(175, 42)
-$script:BtnStop.Location = New-Object System.Drawing.Point(415, 252)
-$script:BtnStop.BackColor = [System.Drawing.Color]::FromArgb(244, 67, 54)
-$script:BtnStop.ForeColor = [System.Drawing.Color]::White
-$script:BtnStop.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$script:BtnStop.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
-$script:Form.Controls.Add($script:BtnStop)
-
-$script:BtnMcp = New-Object System.Windows.Forms.Button
-$script:BtnMcp.Size = New-Object System.Drawing.Size(570, 34)
-$script:BtnMcp.Location = New-Object System.Drawing.Point(20, 304)
-$script:BtnMcp.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$script:BtnMcp.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-$script:Form.Controls.Add($script:BtnMcp)
-
-$script:AgentGroup = New-Object System.Windows.Forms.GroupBox
-$script:AgentGroup.Size = New-Object System.Drawing.Size(570, 156)
-$script:AgentGroup.Location = New-Object System.Drawing.Point(20, 348)
-$script:Form.Controls.Add($script:AgentGroup)
-
-$script:AgentLabels = New-Object System.Collections.ArrayList
-$agentNames = @("Codex", "TRAE SOLO CN", "OpenCode", "Claude Code")
-for ($i = 0; $i -lt $agentNames.Count; $i++) {
-    $label = New-Object System.Windows.Forms.Label
-    $label.Size = New-Object System.Drawing.Size(350, 21)
-    $label.Location = New-Object System.Drawing.Point(14, (22 + ($i * 22)))
-    $label.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-    $label.Text = $agentNames[$i]
-    $script:AgentGroup.Controls.Add($label)
-    [void]$script:AgentLabels.Add($label)
+$script:NavButtons = New-Object System.Collections.ArrayList
+for ($i = 0; $i -lt 6; $i++) {
+    $tabButton = New-FlatButton -Text "" -X (2 + ($i * 186)) -Y 5 -Width 178 -Height 32 -Primary:($i -eq 5)
+    if ($i -ne 5) {
+        $tabButton.Enabled = $false
+        $tabButton.ForeColor = [System.Drawing.Color]::FromArgb(156, 163, 175)
+    }
+    $script:NavPanel.Controls.Add($tabButton)
+    [void]$script:NavButtons.Add($tabButton)
 }
 
-$script:BtnScanAgents = New-Object System.Windows.Forms.Button
-$script:BtnScanAgents.Size = New-Object System.Drawing.Size(170, 28)
-$script:BtnScanAgents.Location = New-Object System.Drawing.Point(386, 20)
-$script:BtnScanAgents.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$script:BtnScanAgents.Font = New-Object System.Drawing.Font("Segoe UI", 8)
-$script:AgentGroup.Controls.Add($script:BtnScanAgents)
+$script:AboutHeadingLabel = New-CardLabel -Text "" -X 24 -Y 154 -Width 220 -Height 24 -Size 10.5 -Style ([System.Drawing.FontStyle]::Bold)
+$script:Form.Controls.Add($script:AboutHeadingLabel)
 
-$script:BtnConfigureAgents = New-Object System.Windows.Forms.Button
-$script:BtnConfigureAgents.Size = New-Object System.Drawing.Size(170, 28)
-$script:BtnConfigureAgents.Location = New-Object System.Drawing.Point(386, 52)
-$script:BtnConfigureAgents.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$script:BtnConfigureAgents.Font = New-Object System.Drawing.Font("Segoe UI", 8)
-$script:AgentGroup.Controls.Add($script:BtnConfigureAgents)
+$script:AboutDescriptionLabel = New-CardLabel -Text "" -X 24 -Y 180 -Width 520 -Height 22 -Size 8.5
+$script:AboutDescriptionLabel.ForeColor = [System.Drawing.Color]::FromArgb(107, 114, 128)
+$script:Form.Controls.Add($script:AboutDescriptionLabel)
 
-$script:BtnCopyCli = New-Object System.Windows.Forms.Button
-$script:BtnCopyCli.Size = New-Object System.Drawing.Size(170, 28)
-$script:BtnCopyCli.Location = New-Object System.Drawing.Point(386, 84)
-$script:BtnCopyCli.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$script:BtnCopyCli.Font = New-Object System.Drawing.Font("Segoe UI", 8)
-$script:AgentGroup.Controls.Add($script:BtnCopyCli)
+$script:AboutPanel = New-Object System.Windows.Forms.Panel
+$script:AboutPanel.Size = New-Object System.Drawing.Size(1120, 108)
+$script:AboutPanel.Location = New-Object System.Drawing.Point(24, 216)
+$script:AboutPanel.BackColor = [System.Drawing.Color]::White
+$script:AboutPanel.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+$script:Form.Controls.Add($script:AboutPanel)
 
-$script:BtnSyncShared = New-Object System.Windows.Forms.Button
-$script:BtnSyncShared.Size = New-Object System.Drawing.Size(170, 28)
-$script:BtnSyncShared.Location = New-Object System.Drawing.Point(386, 116)
-$script:BtnSyncShared.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$script:BtnSyncShared.Font = New-Object System.Drawing.Font("Segoe UI", 8)
-$script:AgentGroup.Controls.Add($script:BtnSyncShared)
+$script:ProductNameLabel = New-CardLabel -Text "" -X 24 -Y 24 -Width 300 -Height 28 -Size 11 -Style ([System.Drawing.FontStyle]::Bold)
+$script:AboutPanel.Controls.Add($script:ProductNameLabel)
+
+$script:ProductVersionLabel = New-CardLabel -Text "" -X 24 -Y 58 -Width 180 -Height 22 -Size 8
+$script:ProductVersionLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
+$script:ProductVersionLabel.BackColor = [System.Drawing.Color]::White
+$script:ProductVersionLabel.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+$script:AboutPanel.Controls.Add($script:ProductVersionLabel)
+
+$script:NodeLabel = New-Object System.Windows.Forms.Label
+$script:NodeLabel.Size = New-Object System.Drawing.Size(210, 20)
+$script:NodeLabel.Location = New-Object System.Drawing.Point(246, 20)
+$script:NodeLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+$script:AboutPanel.Controls.Add($script:NodeLabel)
+
+$script:AgentMemoryLabel = New-Object System.Windows.Forms.Label
+$script:AgentMemoryLabel.Size = New-Object System.Drawing.Size(210, 20)
+$script:AgentMemoryLabel.Location = New-Object System.Drawing.Point(246, 45)
+$script:AgentMemoryLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+$script:AboutPanel.Controls.Add($script:AgentMemoryLabel)
+
+$script:IiiLabel = New-Object System.Windows.Forms.Label
+$script:IiiLabel.Size = New-Object System.Drawing.Size(210, 20)
+$script:IiiLabel.Location = New-Object System.Drawing.Point(246, 70)
+$script:IiiLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+$script:AboutPanel.Controls.Add($script:IiiLabel)
+
+$script:ServiceLabel = New-Object System.Windows.Forms.Label
+$script:ServiceLabel.Size = New-Object System.Drawing.Size(210, 20)
+$script:ServiceLabel.Location = New-Object System.Drawing.Point(470, 45)
+$script:ServiceLabel.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
+$script:AboutPanel.Controls.Add($script:ServiceLabel)
+
+$script:BtnInstall = New-FlatButton -Text "" -X 700 -Y 16 -Width 94 -Height 28 -Primary
+$script:AboutPanel.Controls.Add($script:BtnInstall)
+
+$script:BtnStart = New-FlatButton -Text "" -X 802 -Y 16 -Width 94 -Height 28
+$script:AboutPanel.Controls.Add($script:BtnStart)
+
+$script:BtnStop = New-FlatButton -Text "" -X 904 -Y 16 -Width 94 -Height 28
+$script:AboutPanel.Controls.Add($script:BtnStop)
+
+$script:BtnMcp = New-FlatButton -Text "" -X 1006 -Y 16 -Width 94 -Height 28
+$script:AboutPanel.Controls.Add($script:BtnMcp)
+
+$script:BtnCopyCli = New-FlatButton -Text "" -X 700 -Y 58 -Width 94 -Height 28
+$script:AboutPanel.Controls.Add($script:BtnCopyCli)
+
+$script:BtnSyncShared = New-FlatButton -Text "" -X 802 -Y 58 -Width 94 -Height 28
+$script:AboutPanel.Controls.Add($script:BtnSyncShared)
+
+$script:BtnWorkspaceBridge = New-FlatButton -Text "" -X 904 -Y 58 -Width 94 -Height 28
+$script:AboutPanel.Controls.Add($script:BtnWorkspaceBridge)
+
+$script:BtnMigrateHome = New-FlatButton -Text "" -X 1006 -Y 58 -Width 94 -Height 28
+$script:AboutPanel.Controls.Add($script:BtnMigrateHome)
+
+$script:LocalEnvLabel = New-CardLabel -Text "" -X 24 -Y 356 -Width 240 -Height 26 -Size 10.5 -Style ([System.Drawing.FontStyle]::Bold)
+$script:Form.Controls.Add($script:LocalEnvLabel)
+
+$script:BtnScanAgents = New-FlatButton -Text "" -X 828 -Y 350 -Width 96 -Height 28
+$script:Form.Controls.Add($script:BtnScanAgents)
+
+$script:BtnConfigureAgents = New-FlatButton -Text "" -X 934 -Y 350 -Width 96 -Height 28
+$script:Form.Controls.Add($script:BtnConfigureAgents)
+
+$script:BtnUpgradeAll = New-FlatButton -Text (T "UpgradeAll") -X 1040 -Y 350 -Width 104 -Height 28 -Primary
+$script:BtnUpgradeAll.Enabled = $false
+$script:Form.Controls.Add($script:BtnUpgradeAll)
+
+$script:ToolCardsPanel = New-Object System.Windows.Forms.Panel
+$script:ToolCardsPanel.Size = New-Object System.Drawing.Size(1120, 360)
+$script:ToolCardsPanel.Location = New-Object System.Drawing.Point(24, 390)
+$script:ToolCardsPanel.BackColor = [System.Drawing.Color]::FromArgb(250, 250, 250)
+$script:ToolCardsPanel.AutoScroll = $true
+$script:Form.Controls.Add($script:ToolCardsPanel)
+
+$script:AgentLabels = New-Object System.Collections.ArrayList
+$script:ToolCardControls = New-Object System.Collections.ArrayList
+$initialCards = @(Get-AgentToolCards)
+for ($i = 0; $i -lt $initialCards.Count; $i++) {
+    $col = $i % 3
+    $row = [math]::Floor($i / 3)
+    $x = $col * 370
+    $y = $row * 172
+    $cardControl = New-ToolCardControl -Card $initialCards[$i] -X $x -Y $y
+    $script:ToolCardsPanel.Controls.Add($cardControl.Panel)
+    [void]$script:ToolCardControls.Add($cardControl)
+}
 
 $script:ActionGroup = New-Object System.Windows.Forms.GroupBox
 $script:ActionGroup.Size = New-Object System.Drawing.Size(570, 58)
-$script:ActionGroup.Location = New-Object System.Drawing.Point(20, 514)
+$script:ActionGroup.Location = New-Object System.Drawing.Point(24, 766)
 $script:Form.Controls.Add($script:ActionGroup)
 
 $script:ActionLabel = New-Object System.Windows.Forms.Label
@@ -1224,8 +2464,8 @@ $script:ActionLabel.Font = New-Object System.Drawing.Font("Segoe UI", 10, [Syste
 $script:ActionGroup.Controls.Add($script:ActionLabel)
 
 $script:LogGroup = New-Object System.Windows.Forms.GroupBox
-$script:LogGroup.Size = New-Object System.Drawing.Size(570, 102)
-$script:LogGroup.Location = New-Object System.Drawing.Point(20, 582)
+$script:LogGroup.Size = New-Object System.Drawing.Size(530, 58)
+$script:LogGroup.Location = New-Object System.Drawing.Point(614, 766)
 $script:Form.Controls.Add($script:LogGroup)
 
 $script:LogBox = New-Object System.Windows.Forms.TextBox
@@ -1233,7 +2473,7 @@ $script:LogBox.Multiline = $true
 $script:LogBox.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
 $script:LogBox.ReadOnly = $true
 $script:LogBox.Font = New-Object System.Drawing.Font("Consolas", 8)
-$script:LogBox.Size = New-Object System.Drawing.Size(546, 74)
+$script:LogBox.Size = New-Object System.Drawing.Size(506, 30)
 $script:LogBox.Location = New-Object System.Drawing.Point(12, 20)
 $script:LogBox.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
 $script:LogBox.ForeColor = [System.Drawing.Color]::FromArgb(200, 255, 200)
@@ -1257,6 +2497,8 @@ $script:BtnScanAgents.Add_Click({ Scan-AgentClients })
 $script:BtnConfigureAgents.Add_Click({ Configure-AgentClients })
 $script:BtnCopyCli.Add_Click({ Copy-CliCommands })
 $script:BtnSyncShared.Add_Click({ Sync-SharedFilesFromUi })
+$script:BtnWorkspaceBridge.Add_Click({ Bridge-WorkspaceFromUi })
+$script:BtnMigrateHome.Add_Click({ Migrate-DataHomeFromUi })
 
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 5000
@@ -1271,11 +2513,16 @@ $timer.Start()
 Apply-Language
 Update-AgentClientStatus
 Set-ActionFeedback (T "Ready")
+if ($UiSmokeTest) {
+    Write-Output "UI_SMOKE_OK"
+    exit 0
+}
 Write-Log (T "InitialLog1")
 Write-Log (T "InitialLog2")
 Write-Log (T "InitialLog3")
 
 [void]$script:Form.ShowDialog()
+
 
 
 

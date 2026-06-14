@@ -1,8 +1,8 @@
 # CrossAgnetCoding
 
-Version: 0.2.0
+Version: 0.3.0-mvp
 
-CrossAgnetCoding is a Windows GUI for sharing AgentMemory across local Coding Agents. It installs and starts AgentMemory, configures MCP access for multiple agent tools, and provides cc-switch-inspired shared setup files for cross-agent workflows.
+CrossAgnetCoding is a Windows GUI + CLI/TUI MVP for sharing AgentMemory and workspace handoff context across local Coding Agents. Codex and TRAE SOLO/CN are first-class targets, with additional MCP setup support for Claude Code, Claude Desktop, Gemini CLI, OpenCode, OpenClaw, and Hermes Agent.
 
 Repository target:
 
@@ -19,6 +19,8 @@ The multi-agent setup workflow is inspired by [farion1231/cc-switch](https://git
 - unified MCP configuration across Coding Agents
 - user-level config backup before writes
 - shared prompt/context files for different agents
+- project-bound workspace memory that survives Codex account changes
+- Codex/TRAE session bridge summaries into shared handoff files
 - copyable CLI snippets for manual setup
 - quick scan of installed/configured agent clients
 
@@ -29,14 +31,34 @@ The multi-agent setup workflow is inspired by [farion1231/cc-switch](https://git
 - Detects and configures:
   - Codex
   - TRAE SOLO CN
-  - OpenCode
+  - TRAE SOLO
   - Claude Code
+  - Claude Desktop
+  - Gemini CLI
+  - OpenCode
+  - OpenClaw
+  - Hermes Agent
 - Provides MCP JSON and CLI command snippets.
-- Generates shared prompt files under `%USERPROFILE%\.CrossAgnetCoding\shared`.
+- Generates shared prompt files under the CrossAgnetCoding data home.
+- Supports configurable data directory migration.
+- Provides CLI and TUI modes.
+- Uses an About-style local environment page with per-tool AI Code cards instead of a single generic agent scan.
 - Chinese/English UI switch.
 - No black `cmd` window when launched from the packaged exe.
 
-## Usage
+## MVP Notes
+
+The session bridge does not force Codex and TRAE to read each other's native chat databases. Instead, it imports bounded, readable session/log snippets into CrossAgnetCoding workspace memory:
+
+- `sessions.jsonl` stores bridge entries.
+- `handoff.md` stores the latest cross-tool summary.
+- generated prompt files expose the handoff to supported tools.
+
+Workspace memory is tied to the project directory, not to the Codex account. If you log out of Codex and sign in with another account, loading the same project directory can still recover CrossAgnetCoding workspace memory.
+
+Deferred from MVP: full provider switching, proxy routing, usage/cost dashboards, and WebDAV/cloud sync.
+
+## GUI Usage
 
 1. Run:
 
@@ -61,7 +83,42 @@ CrossAgnetCoding.exe
 - `复制 CLI 命令 / Copy CLI Commands` for manual setup.
 - `同步共享 Prompt / Sync Shared Prompt` to create shared context files.
 
-6. Restart Codex, TRAE SOLO CN, OpenCode, or Claude Code after MCP config changes.
+- `Bridge Workspace` to initialize project memory and import Codex/TRAE handoff snippets.
+- `Migrate Data Home` to copy CrossAgnetCoding data to a new directory and switch future reads/writes.
+
+The main screen now mirrors the cc-switch About page structure: a product/version card, service controls, and a `Local Environment Check` grid. Each AI Code tool card shows installed status, current version when it can be read safely, latest-version placeholder, CrossAgnetCoding MCP connection status, and a per-tool configure button.
+
+6. Restart Codex, TRAE SOLO CN, OpenCode, Claude, Gemini, OpenClaw, or Hermes after MCP config changes when required.
+
+## CLI Usage
+
+Run the source script directly for CLI/TUI workflows:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\src\AgentMemoryManager.ps1 -Cli env tools
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\src\AgentMemoryManager.ps1 -Cli agents scan
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\src\AgentMemoryManager.ps1 -Cli agents configure
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\src\AgentMemoryManager.ps1 -Cli workspace init "D:\path\to\project"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\src\AgentMemoryManager.ps1 -Cli workspace bridge "D:\path\to\project"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\src\AgentMemoryManager.ps1 -Cli config home
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\src\AgentMemoryManager.ps1 -Cli config migrate "D:\CrossAgnetCodingData"
+```
+
+TUI mode:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\src\AgentMemoryManager.ps1 -Tui
+```
+
+## Data Directory
+
+Default:
+
+```text
+%USERPROFILE%\.CrossAgnetCoding
+```
+
+The data directory stores workspace memory, prompt files, backups, settings, and bridge logs. Use `config migrate` to copy data to a new directory and switch the app pointer. The old directory is preserved.
 
 ## Project Structure
 
@@ -83,7 +140,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1
 The output file is:
 
 ```text
-CrossAgnetCoding.exe
+release\CrossAgnetCoding.exe
 ```
 
 ## Test

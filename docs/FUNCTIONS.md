@@ -2,7 +2,7 @@
 
 This document explains the public behavior and important internal functions so the project can be maintained after release.
 
-Version: 0.2.0
+Version: 0.3.0-mvp
 
 ## Main User Workflows
 
@@ -14,6 +14,8 @@ The manager checks:
 - global `agentmemory.cmd`
 - `iii.exe` under `%USERPROFILE%\.agentmemory\bin` or `%USERPROFILE%\.local\bin`
 - local AgentMemory service on `localhost:3111`
+
+Node.js detection uses file-version metadata and cached results before executing `node.exe`, so a broken Node install does not create repeated Windows error dialogs during GUI refresh.
 
 ### Install All
 
@@ -39,8 +41,15 @@ The manager detects and configures client-side AgentMemory access for:
 
 - Codex
 - TRAE SOLO CN
-- OpenCode
+- TRAE SOLO
 - Claude Code
+- Claude Desktop
+- Gemini CLI
+- OpenCode
+- OpenClaw
+- Hermes Agent
+
+The GUI presents these clients in an About-style `Local Environment Check` card grid, inspired by the cc-switch settings/about page. This is intentionally richer than a generic `Scan Agents` result: each card has install status, current version when it can be read without launching risky Node wrappers, latest-version placeholder, MCP connection status, and a per-tool configure action.
 
 Each client has three concepts:
 
@@ -56,6 +65,10 @@ CrossAgnetCoding borrows the practical multi-client setup ideas from `farion1231
 - one-click MCP configuration
 - config backups before writes
 - shared prompt/context files
+- project-bound workspace memory
+- Codex/TRAE session bridge summaries
+- configurable data directory migration
+- CLI/TUI mode for repeatable workflows
 - copyable CLI snippets
 
 `Sync-SharedAgentFiles` writes shared context files to:
@@ -71,6 +84,34 @@ Generated files:
 - `OPENCODE.md`
 - `TRAE.md`
 
+### Workspace Session Bridge
+
+`Initialize-WorkspaceMemory` creates a project-bound workspace under the CrossAgnetCoding data home. `Import-CodexSessionBridge` and `Import-TraeSessionBridge` import bounded readable snippets into:
+
+```text
+workspaces\<workspace-id>\sessions.jsonl
+workspaces\<workspace-id>\handoff.md
+```
+
+Workspace memory is keyed by the normalized project directory plus the Git `remote.origin.url` when the folder is a Git repository, and is independent from Codex account state. Non-Git folders fall back to a stable path-only identifier.
+
+The GUI `Bridge Workspace` button runs the same flow: choose a project folder, import Codex/TRAE snippets, refresh the handoff, and regenerate prompt files for that workspace.
+
+### CLI And TUI
+
+The script supports:
+
+```powershell
+-Cli env tools
+-Cli agents scan
+-Cli agents configure
+-Cli workspace init <path>
+-Cli workspace bridge <path>
+-Cli config home
+-Cli config migrate <path>
+-Tui
+```
+
 ## Important Functions
 
 ### `Get-EnvironmentStatus`
@@ -85,6 +126,18 @@ Returns:
 %USERPROFILE%\.CrossAgnetCoding
 ```
 
+If settings contain `dataHome`, or `CROSSAGNETCODING_HOME` is set, the configured path is returned instead.
+
+### `Move-CrossAgnetCodingHome`
+
+Copies the current CrossAgnetCoding data directory to a new path, verifies it is writable, updates `settings.json`, and leaves the old directory in place.
+
+The GUI `Migrate Data Home` button exposes the same migration behavior with a folder picker.
+
+### `Get-AgentTargetDefinitions`
+
+Returns the ordered MVP target list. Codex, TRAE SOLO CN, and TRAE SOLO are first.
+
 ### `Get-AgentClientStatuses`
 
 Returns one status object per Coding Agent. Each object includes:
@@ -96,6 +149,23 @@ Returns one status object per Coding Agent. Each object includes:
 - `CliAvailable`
 - `ConfigPath`
 - `Details`
+
+### `Get-AgentToolCards`
+
+Transforms agent client status into the card view model used by the About page. Each card includes:
+
+- `CurrentVersion`
+- `LatestVersion`
+- `InstallStatus`
+- `ConfigStatus`
+- `Detail`
+- `ActionText`
+
+Version reads are deliberately conservative. The manager prefers file metadata and does not repeatedly launch broken Node-backed commands just to populate the UI.
+
+### `New-ToolCardControl` And `Update-ToolCardControls`
+
+Build and refresh the WinForms local environment cards. These functions are the UI boundary for the cc-switch-inspired About page grid.
 
 ### `Configure-AllAgentClients`
 
@@ -115,6 +185,41 @@ Writes AgentMemory MCP configuration to:
 
 ```text
 %APPDATA%\TRAE SOLO CN\User\mcp.json
+%APPDATA%\TRAE SOLO\User\mcp.json
+```
+
+`Configure-TraeCnMcp` and `Configure-TraeSoloMcp` are available for single-target writes.
+
+### `Configure-ClaudeDesktopMcp`
+
+Writes AgentMemory MCP configuration to:
+
+```text
+%APPDATA%\Claude\claude_desktop_config.json
+```
+
+### `Configure-GeminiMcp`
+
+Writes AgentMemory MCP configuration to:
+
+```text
+%USERPROFILE%\.gemini\settings.json
+```
+
+### `Configure-OpenClawMcp`
+
+Writes AgentMemory MCP configuration to:
+
+```text
+%USERPROFILE%\.openclaw\openclaw.json
+```
+
+### `Configure-HermesMcp`
+
+Writes a minimal Hermes YAML-style AgentMemory MCP block to:
+
+```text
+%USERPROFILE%\.hermes\config.yaml
 ```
 
 ### `Configure-OpenCodeMcp`
@@ -155,6 +260,14 @@ Returns the shared context prompt written to all generated agent prompt files.
 
 Writes shared prompt files for Codex-style agents, Claude Code, OpenCode, and TRAE SOLO CN.
 
+### `Get-ProjectGitRemote`
+
+Returns the lowercased `remote.origin.url` for a project folder when Git is installed and the folder is a repository, otherwise an empty string. Used by `Get-WorkspaceId` to make workspace identity Git-remote aware.
+
+### `Sync-WorkspacePromptFiles`
+
+Writes workspace-specific prompt files for Codex, TRAE, Claude, Gemini, OpenCode, OpenClaw, and Hermes.
+
 ### `Get-CcSwitchInspiredFeatures`
 
 Returns a short list of cc-switch-inspired features currently implemented in this project.
@@ -163,4 +276,6 @@ Returns a short list of cc-switch-inspired features currently implemented in thi
 
 - Config files are backed up before automatic writes.
 - The manager only writes user-level config files.
+- Data home migration copies first and does not delete the old directory.
+- Session bridge imports are bounded and write summaries, not full proprietary chat database migrations.
 - The packaged exe must launch through `wscript.exe launch.vbs` so no black `cmd` window appears.
