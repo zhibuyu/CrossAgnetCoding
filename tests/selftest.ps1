@@ -39,6 +39,7 @@ foreach ($requiredTargetFeature in @(
 foreach ($requiredStartupFeature in @(
     "function Get-CommandPathSafe",
     "function Get-PlaceholderToolCards",
+    "function Test-AgentInstallPresent",
     "Add_Shown",
     "InitialScanTimer"
 )) {

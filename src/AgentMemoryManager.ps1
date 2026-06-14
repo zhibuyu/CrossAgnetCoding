@@ -73,7 +73,10 @@ $script:Text = @{
         UnknownVersion = "可执行，版本未知"
         NotChecked = "未检查"
         Scanning = "扫描中…"
-        InstallOrExecutableMissing = "not installed or not executable"
+        VersionUnknown = "版本未知"
+        DetailCliMcp = "命令行 + MCP"
+        DetailMcpDetected = "已检测到 MCP 配置路径"
+        InstallOrExecutableMissing = "未安装或不可执行"
         ConfigureTool = "配置"
         ReconfigureTool = "重新配置"
         ToolConfigureDone = "{0} 已写入 CrossAgnetCoding MCP 配置"
@@ -182,7 +185,10 @@ $script:Text = @{
         UnknownVersion = "Executable, version unknown"
         NotChecked = "Not Checked"
         Scanning = "Scanning…"
-        InstallOrExecutableMissing = "not installed or not executable"
+        VersionUnknown = "Unknown"
+        DetailCliMcp = "CLI + MCP"
+        DetailMcpDetected = "MCP config path detected"
+        InstallOrExecutableMissing = "Not installed or not executable"
         ConfigureTool = "Configure"
         ReconfigureTool = "Reconfigure"
         ToolConfigureDone = "{0} CrossAgnetCoding MCP config written"
@@ -784,13 +790,62 @@ function Get-CliConfigCommands {
     ) -join "`r`n"
 }
 
+function Test-AgentInstallPresent {
+    param(
+        [object]$Target,
+        $CommandInfo
+    )
+
+    # A resolvable CLI is definitive proof of installation.
+    if ($null -ne $CommandInfo) {
+        return $true
+    }
+
+    $root = [string]$Target.InstallRoot
+    if ([string]::IsNullOrWhiteSpace($root) -or -not (Test-Path -LiteralPath $root)) {
+        return $false
+    }
+
+    # Ignore the artifacts this manager creates itself: the config file, its
+    # timestamped backups, and the single directory chain leading to the config
+    # file. Any *other* entry is evidence of a genuine installation, since real
+    # tools create cache, session, profile and storage subdirectories while the
+    # manager only ever writes one flat config file. This prevents a tool that
+    # was merely "configured" (but never installed) from reporting as installed.
+    $configPath = [string]$Target.ConfigPath
+    $configName = Split-Path -Leaf $configPath
+    $managedTop = $configName
+    try {
+        $rel = $configPath.Substring($root.Length).TrimStart("\", "/")
+        $managedTop = ($rel -split "[\\/]")[0]
+    } catch {
+    }
+
+    foreach ($item in @(Get-ChildItem -LiteralPath $root -Force -ErrorAction SilentlyContinue)) {
+        $name = $item.Name
+        if ($name -eq $configName) { continue }
+        if ($name -like ($configName + ".bak-*")) { continue }
+        if ($name -eq $managedTop) {
+            if ($item.PSIsContainer) {
+                $inner = @(Get-ChildItem -LiteralPath $item.FullName -Force -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Name -ne $configName -and ($_.Name -notlike ($configName + ".bak-*")) })
+                if ($inner.Count -gt 0) { return $true }
+            }
+            continue
+        }
+        return $true
+    }
+
+    return $false
+}
+
 function Get-AgentClientStatuses {
     $items = New-Object System.Collections.Generic.List[object]
 
     foreach ($target in Get-AgentTargetDefinitions) {
         $cmd = Get-CommandAny -Names $target.CommandNames
         $configPath = [string]$target.ConfigPath
-        $installed = (($null -ne $cmd) -or (Test-Path -LiteralPath $target.InstallRoot) -or (Test-Path -LiteralPath $configPath))
+        $installed = Test-AgentInstallPresent -Target $target -CommandInfo $cmd
         $configured = (Test-Path -LiteralPath $configPath) -and (Test-AgentMemoryTextConfigured (Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 -ErrorAction SilentlyContinue))
         [void]$items.Add([pscustomobject]@{
             Id = $target.Id
@@ -848,9 +903,16 @@ function Get-AgentToolCards {
         $installedText = if ($status.Installed) { T "Installed" } else { T "NotInstalled" }
         $configuredText = if ($status.Configured) { T "Configured" } else { T "NotConfigured" }
         $detail = if ($status.Installed) {
-            if ($status.CliAvailable) { "CLI + MCP" } else { "MCP config path detected" }
+            if ($status.CliAvailable) { T "DetailCliMcp" } else { T "DetailMcpDetected" }
         } else {
             T "InstallOrExecutableMissing"
+        }
+        $currentVersion = if ($null -ne $cmd) {
+            Get-ToolVersionText -CommandInfo $cmd
+        } elseif ($status.Installed) {
+            T "VersionUnknown"
+        } else {
+            T "NotInstalled"
         }
 
         [void]$cards.Add([pscustomobject]@{
@@ -860,7 +922,7 @@ function Get-AgentToolCards {
             Installed = [bool]$status.Installed
             Configured = [bool]$status.Configured
             ConfigPath = $status.ConfigPath
-            CurrentVersion = Get-ToolVersionText -CommandInfo $cmd
+            CurrentVersion = $currentVersion
             LatestVersion = T "NotChecked"
             InstallStatus = $installedText
             ConfigStatus = $configuredText
@@ -1576,6 +1638,49 @@ if ($SelfTest) {
     $placeholderCards = @(Get-PlaceholderToolCards)
     if ($placeholderCards.Count -ne (@(Get-AgentTargetDefinitions)).Count) {
         [void]$errors.Add("Placeholder tool cards do not match target definitions")
+    }
+
+    # Install detection must not treat the manager's own config writes as proof of
+    # installation: a directory holding only the config file (and its backups) is
+    # "configured but not installed"; a real install adds other content.
+    $detectRoot = Join-Path $env:TEMP ("cac-install-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $detectRoot -Force | Out-Null
+    try {
+        $detectCfg = Join-Path $detectRoot "settings.json"
+        Set-Content -LiteralPath $detectCfg -Value "{}" -Encoding UTF8
+        $flatTarget = [pscustomobject]@{ InstallRoot = $detectRoot; ConfigPath = $detectCfg }
+        if (Test-AgentInstallPresent -Target $flatTarget -CommandInfo $null) {
+            [void]$errors.Add("Config-only directory wrongly detected as installed")
+        }
+        Set-Content -LiteralPath ($detectCfg + ".bak-20260101000000") -Value "{}" -Encoding UTF8
+        if (Test-AgentInstallPresent -Target $flatTarget -CommandInfo $null) {
+            [void]$errors.Add("Config+backup directory wrongly detected as installed")
+        }
+        if (-not (Test-AgentInstallPresent -Target $flatTarget -CommandInfo ([pscustomobject]@{ Source = "x" }))) {
+            [void]$errors.Add("Resolvable CLI should count as installed")
+        }
+        New-Item -ItemType Directory -Path (Join-Path $detectRoot "cache") -Force | Out-Null
+        if (-not (Test-AgentInstallPresent -Target $flatTarget -CommandInfo $null)) {
+            [void]$errors.Add("Real install (extra subdirectory) not detected")
+        }
+
+        # Nested config (TRAE-style User\mcp.json): the managed sub-folder alone is
+        # not an install, but other content inside it is.
+        $nestedRoot = Join-Path $detectRoot "nested"
+        $nestedUser = Join-Path $nestedRoot "User"
+        New-Item -ItemType Directory -Path $nestedUser -Force | Out-Null
+        $nestedCfg = Join-Path $nestedUser "mcp.json"
+        Set-Content -LiteralPath $nestedCfg -Value "{}" -Encoding UTF8
+        $nestedTarget = [pscustomobject]@{ InstallRoot = $nestedRoot; ConfigPath = $nestedCfg }
+        if (Test-AgentInstallPresent -Target $nestedTarget -CommandInfo $null) {
+            [void]$errors.Add("Manager-created nested config wrongly detected as installed")
+        }
+        Set-Content -LiteralPath (Join-Path $nestedUser "settings.json") -Value "{}" -Encoding UTF8
+        if (-not (Test-AgentInstallPresent -Target $nestedTarget -CommandInfo $null)) {
+            [void]$errors.Add("Real content inside nested config folder not detected")
+        }
+    } finally {
+        Remove-Item -LiteralPath $detectRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 
     # Codex config path must follow CODEX_HOME when it points to an existing
