@@ -202,8 +202,8 @@ foreach ($required in @(
 
 $readme = Get-Content -LiteralPath (Join-Path $root "README.md") -Raw -Encoding UTF8
 foreach ($requiredReadme in @(
-    "# CrossAgnetCoding",
-    "Version: 0.0.1",
+    "CrossAgnetCoding",
+    "version-0.0.1",
     "CrossAgnetCoding.exe",
     "https://github.com/rohitg00/agentmemory",
     "https://github.com/farion1231/cc-switch",

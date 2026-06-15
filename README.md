@@ -10,7 +10,7 @@
 <h1 align="center">CrossAgnetCoding</h1>
 
 <p align="center">
-  <b>English</b> | <a href="#简体中文">简体中文</a> | <a href="#繁體中文">繁體中文</a>
+  <b>English</b> | <a href="README.zh-CN.md">简体中文</a> | <a href="README.zh-TW.md">繁體中文</a>
 </p>
 
 <p align="center">
@@ -246,91 +246,3 @@ MIT &mdash; see [LICENSE](LICENSE) for details.
 <p align="center">
   ⭐ If this project helps you, please consider starring it!
 </p>
-
----
-
-<h2 id="简体中文">简体中文</h2>
-
-<h3 align="center">CrossAgnetCoding — 跨 AI 编码工具的共享记忆管理器</h3>
-
-### 它解决什么问题？
-
-你可能同时使用多个 AI 编码工具（Codex、TRAE、Claude、Gemini 等）。每个工具的对话记忆互相隔离，换工具、换账号、重启后就丢失了之前讨论的目标、决策和约定。
-
-**CrossAgnetCoding 的做法：** 在本地启动一个 AgentMemory 服务，通过 MCP 协议一键接入所有编码工具，让它们共享同一份持久化记忆。
-
-### 快速开始
-
-1. 从 [Releases](https://github.com/zhibuyu/CrossAgnetCoding/releases) 下载 `CrossAgnetCoding.exe`
-2. 运行，点击 **安装全部**
-3. 点击 **启动服务**
-4. 点击 **全部配置** 写入各工具的 MCP 配置
-5. 重启你的编码工具
-
-### 支持的编码工具
-
-自动检测安装状态，一键写入 MCP 配置：Codex、TRAE SOLO CN、TRAE SOLO、Qoder CN、Claude Code、Claude Desktop、Gemini CLI、OpenCode、OpenClaw、Hermes Agent。
-
-### 核心功能
-
-- **共享记忆** — 所有工具读写同一份持久记忆，支持关键词+语义混合检索
-- **一键 MCP 配置** — 自动检测并写入各工具配置，写入前自动备份
-- **共享 Prompt** — 生成 7 种 Agent 提示文件，统一记忆使用方式
-- **工作区桥接** — 绑定项目目录，导入 Codex/TRAE 会话片段，生成交接摘要
-- **记忆设置** — 语义检索（BM25/本地MiniLM/云端API）、LLM 智能压缩、MCP 工具集
-- **存储迁移** — 三类目录可独立迁移到其他磁盘
-- **GUI + CLI + TUI** — 图形界面、命令行、文本界面三种模式
-
-### 构建与测试
-
-```powershell
-# 构建
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1
-
-# 测试
-powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\selftest.ps1
-```
-
----
-
-<h2 id="繁體中文">繁體中文</h2>
-
-<h3 align="center">CrossAgnetCoding — 跨 AI 編碼工具的共享記憶管理器</h3>
-
-### 它解決什麼問題？
-
-你可能同時使用多個 AI 編碼工具（Codex、TRAE、Claude、Gemini 等）。每個工具的對話記憶互相隔離，換工具、換帳號、重啟後就丟失了之前討論的目標、決策和約定。
-
-**CrossAgnetCoding 的做法：** 在本地啟動一個 AgentMemory 服務，透過 MCP 協定一鍵接入所有編碼工具，讓它們共享同一份持久化記憶。
-
-### 快速開始
-
-1. 從 [Releases](https://github.com/zhibuyu/CrossAgnetCoding/releases) 下載 `CrossAgnetCoding.exe`
-2. 執行，點選 **安裝全部**
-3. 點選 **啟動服務**
-4. 點選 **全部配置** 寫入各工具的 MCP 配置
-5. 重啟你的編碼工具
-
-### 支援的編碼工具
-
-自動檢測安裝狀態，一鍵寫入 MCP 配置：Codex、TRAE SOLO CN、TRAE SOLO、Qoder CN、Claude Code、Claude Desktop、Gemini CLI、OpenCode、OpenClaw、Hermes Agent。
-
-### 核心功能
-
-- **共享記憶** — 所有工具讀寫同一份持久記憶，支援關鍵詞+語義混合檢索
-- **一鍵 MCP 配置** — 自動檢測並寫入各工具配置，寫入前自動備份
-- **共享 Prompt** — 生成 7 種 Agent 提示檔案，統一記憶使用方式
-- **工作區橋接** — 綁定專案目錄，匯入 Codex/TRAE 會話片段，生成交接摘要
-- **記憶設定** — 語義檢索（BM25/本地MiniLM/雲端API）、LLM 智能壓縮、MCP 工具集
-- **儲存遷移** — 三類目錄可獨立遷移到其他磁碟
-- **GUI + CLI + TUI** — 圖形介面、命令列、文字介面三種模式
-
-### 構建與測試
-
-```powershell
-# 構建
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1
-
-# 測試
-powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\selftest.ps1
-```
