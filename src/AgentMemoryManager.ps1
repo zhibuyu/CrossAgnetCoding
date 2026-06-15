@@ -47,7 +47,7 @@ $script:Text = @{
         InstallAll = "安装全部"
         StartService = "启动服务"
         StopService = "停止服务"
-        CopyMcp = "复制 MCP 配置到剪贴板"
+        CopyMcp = "复制 MCP 配置"
         CodingAgentAccess = "Coding Agent 接入"
         ScanAgents = "刷新"
         ConfigureAgents = "一键配置 MCP"
@@ -87,7 +87,7 @@ $script:Text = @{
         AgentScanDone = "Coding Agent 扫描完成"
         AgentConfigureDone = "Coding Agent MCP 配置完成，请重启对应工具"
         AgentConfigureTitle = "配置完成"
-        AgentConfigureBody = "已尝试写入 Codex、TRAE SOLO、OpenCode、Claude、Gemini、OpenClaw、Hermes 的用户级 MCP 配置。请查看日志并重启对应工具。"
+        AgentConfigureBody = "已尝试写入 Codex、TRAE SOLO、Qoder CN、OpenCode、Claude、Gemini、OpenClaw、Hermes 的用户级 MCP 配置。请查看日志并重启对应工具。"
         CopyCliOkBody = "CLI 配置命令已复制到剪贴板。"
         SyncSharedDone = "共享 Prompt 文件已同步"
         BridgeWorkspacePrompt = "请选择要桥接记忆的项目目录"
@@ -97,6 +97,7 @@ $script:Text = @{
         MigrateDataDone = "数据目录已迁移：{0}"
         MigrateDataTitle = "迁移完成"
         Log = "日志"
+        DataPathInfo = "数据目录：{0}      服务日志：{1}"
         Ready = "就绪"
         NodeInstalled = "Node.js - 已安装 {0}"
         NodeMissing = "Node.js - 未安装"
@@ -159,7 +160,7 @@ $script:Text = @{
         InstallAll = "Install All"
         StartService = "Start Service"
         StopService = "Stop Service"
-        CopyMcp = "Copy MCP Config to Clipboard"
+        CopyMcp = "Copy MCP Config"
         CodingAgentAccess = "Coding Agent Access"
         ScanAgents = "Refresh"
         ConfigureAgents = "Configure MCP"
@@ -199,7 +200,7 @@ $script:Text = @{
         AgentScanDone = "Coding Agent scan complete"
         AgentConfigureDone = "Coding Agent MCP configuration complete. Restart the tools."
         AgentConfigureTitle = "Configured"
-        AgentConfigureBody = "User-level MCP config was written for Codex, TRAE SOLO, OpenCode, Claude, Gemini, OpenClaw, and Hermes when possible. Check the log and restart the tools."
+        AgentConfigureBody = "User-level MCP config was written for Codex, TRAE SOLO, Qoder CN, OpenCode, Claude, Gemini, OpenClaw, and Hermes when possible. Check the log and restart the tools."
         CopyCliOkBody = "CLI configuration commands copied to clipboard."
         SyncSharedDone = "Shared prompt files synced"
         BridgeWorkspacePrompt = "Choose the project directory to bridge"
@@ -209,6 +210,7 @@ $script:Text = @{
         MigrateDataDone = "Data directory migrated: {0}"
         MigrateDataTitle = "Migration Complete"
         Log = "Log"
+        DataPathInfo = "Data dir: {0}      Service log: {1}"
         Ready = "Ready"
         NodeInstalled = "Node.js - Installed {0}"
         NodeMissing = "Node.js - Not Installed"
@@ -257,7 +259,10 @@ $script:Text = @{
 function T {
     param(
         [string]$Key,
-        [object[]]$Args = @()
+        # Must NOT be named $Args: that collides with the automatic $args
+        # variable, leaving the parameter empty so every "{0}" placeholder would
+        # leak through unformatted.
+        [object[]]$FormatArgs = @()
     )
 
     if ($script:Text -isnot [hashtable]) {
@@ -274,8 +279,8 @@ function T {
     }
 
     $value = [string]$langTable[$Key]
-    if ($Args.Count -gt 0) {
-        return [string]::Format($value, $Args)
+    if ($FormatArgs.Count -gt 0) {
+        return [string]::Format($value, $FormatArgs)
     }
     return $value
 }
@@ -548,6 +553,13 @@ function Get-TraeConfigPaths {
     )
 }
 
+function Get-QoderCnConfigPath {
+    # Qoder CN is a VS Code-based AI IDE. Its MCP servers live in the shared
+    # client cache (verified against an installed build), using the same
+    # mcpServers JSON schema as TRAE SOLO.
+    return (Join-Path $env:APPDATA "QoderCN\SharedClientCache\mcp.json")
+}
+
 function Get-OpenCodeConfigPath {
     return (Join-Path $env:USERPROFILE ".config\opencode\opencode.json")
 }
@@ -600,6 +612,15 @@ function Get-AgentTargetDefinitions {
             ConfigPath = Get-TraeSoloConfigPath
             PromptFile = "TRAE.md"
             ConfigureAction = "Configure-TraeSoloMcp"
+        },
+        [pscustomobject]@{
+            Id = "qoder-cn"
+            Name = "Qoder CN"
+            CommandNames = @()
+            InstallRoot = (Join-Path $env:APPDATA "QoderCN")
+            ConfigPath = Get-QoderCnConfigPath
+            PromptFile = "AGENTS.md"
+            ConfigureAction = "Configure-QoderCnMcp"
         },
         [pscustomobject]@{
             Id = "claude-code"
@@ -706,6 +727,10 @@ function Configure-TraeSoloMcp {
     return (Configure-JsonMcpServers -Path (Get-TraeSoloConfigPath))
 }
 
+function Configure-QoderCnMcp {
+    return (Configure-JsonMcpServers -Path (Get-QoderCnConfigPath))
+}
+
 function Configure-TraeMcp {
     param([switch]$All)
 
@@ -783,6 +808,7 @@ function Get-CliConfigCommands {
         'codex: add [mcp_servers.agentmemory] to %USERPROFILE%\.codex\config.toml',
         'TRAE SOLO CN: paste mcpServers.agentmemory into %APPDATA%\TRAE SOLO CN\User\mcp.json',
         'TRAE SOLO: paste mcpServers.agentmemory into %APPDATA%\TRAE SOLO\User\mcp.json',
+        'Qoder CN: paste mcpServers.agentmemory into %APPDATA%\QoderCN\SharedClientCache\mcp.json',
         'Gemini CLI: add mcpServers.agentmemory to %USERPROFILE%\.gemini\settings.json',
         'OpenCode: add mcp.agentmemory to %USERPROFILE%\.config\opencode\opencode.json',
         'OpenClaw: add mcpServers.agentmemory to %USERPROFILE%\.openclaw\openclaw.json',
@@ -966,6 +992,7 @@ function Configure-AllAgentClients {
         @{ Name = "Codex"; Action = { Configure-CodexMcp } },
         @{ Name = "TRAE CN"; Action = { Configure-TraeCnMcp } },
         @{ Name = "TRAE SOLO"; Action = { Configure-TraeSoloMcp } },
+        @{ Name = "Qoder CN"; Action = { Configure-QoderCnMcp } },
         @{ Name = "OpenCode"; Action = { Configure-OpenCodeMcp } },
         @{ Name = "Claude Code"; Action = { Configure-ClaudeMcp } },
         @{ Name = "Claude Desktop"; Action = { Configure-ClaudeDesktopMcp } },
@@ -1849,8 +1876,7 @@ function Set-Busy {
 
     $script:IsBusy = $Busy
     $script:BtnInstall.Enabled = -not $Busy
-    $script:BtnStart.Enabled = -not $Busy
-    $script:BtnStop.Enabled = -not $Busy
+    $script:BtnStartStop.Enabled = -not $Busy
     $script:BtnMcp.Enabled = -not $Busy
     $script:BtnScanAgents.Enabled = -not $Busy
     $script:BtnConfigureAgents.Enabled = -not $Busy
@@ -1872,25 +1898,30 @@ function Apply-Language {
     $script:LocalEnvLabel.Text = T "LocalEnvCheck"
     $script:ActionGroup.Text = T "LastAction"
     $script:BtnInstall.Text = T "InstallAll"
-    $script:BtnStart.Text = T "StartService"
-    $script:BtnStop.Text = T "StopService"
+    if (Test-ServiceRunning) {
+        $script:BtnStartStop.Text = T "StopService"
+    } else {
+        $script:BtnStartStop.Text = T "StartService"
+    }
     $script:BtnMcp.Text = T "CopyMcp"
     $script:BtnScanAgents.Text = T "ScanAgents"
     $script:BtnConfigureAgents.Text = T "ConfigureAll"
-    $script:BtnUpgradeAll.Text = T "UpgradeAll"
     $script:BtnCopyCli.Text = T "CopyCli"
     $script:BtnSyncShared.Text = T "SyncSharedFiles"
     $script:BtnWorkspaceBridge.Text = T "BridgeWorkspace"
     $script:BtnMigrateHome.Text = T "MigrateDataHome"
     $script:LogGroup.Text = T "Log"
-    if ($script:NavButtons -and $script:NavButtons.Count -eq 6) {
-        $script:NavButtons[0].Text = T "GeneralTab"
-        $script:NavButtons[1].Text = T "RouteTab"
-        $script:NavButtons[2].Text = T "AuthTab"
-        $script:NavButtons[3].Text = T "AdvancedTab"
-        $script:NavButtons[4].Text = T "UsageTab"
-        $script:NavButtons[5].Text = T "AboutTab"
+    Update-DataPathLabel
+}
+
+function Update-DataPathLabel {
+    if ($null -eq $script:DataPathLabel) {
+        return
     }
+
+    $dataHome = Get-CrossAgnetCodingHome
+    $serviceLog = Join-Path $script:AM_DIR "agentmemory-service.log"
+    $script:DataPathLabel.Text = T "DataPathInfo" @($dataHome, $serviceLog)
 }
 
 function Update-Status {
@@ -1926,6 +1957,22 @@ function Update-Status {
     } else {
         $script:ServiceLabel.Text = T "NotRunning"
         $script:ServiceLabel.ForeColor = [System.Drawing.Color]::Red
+    }
+
+    Update-DataPathLabel
+
+    if ($null -ne $script:BtnStartStop) {
+        if ($status.Service) {
+            # Service is up: the button now stops it (red accent).
+            $script:BtnStartStop.Text = T "StopService"
+            $script:BtnStartStop.BackColor = [System.Drawing.Color]::White
+            $script:BtnStartStop.ForeColor = [System.Drawing.Color]::FromArgb(220, 38, 38)
+        } else {
+            # Service is down: the button starts it (primary blue).
+            $script:BtnStartStop.Text = T "StartService"
+            $script:BtnStartStop.BackColor = [System.Drawing.Color]::FromArgb(24, 144, 255)
+            $script:BtnStartStop.ForeColor = [System.Drawing.Color]::White
+        }
     }
 
     [System.Windows.Forms.Application]::DoEvents()
@@ -2379,45 +2426,29 @@ function New-ToolCardControl {
     )
 
     $panel = New-Object System.Windows.Forms.Panel
-    $panel.Size = New-Object System.Drawing.Size(350, 156)
+    $panel.Size = New-Object System.Drawing.Size(350, 108)
     $panel.Location = New-Object System.Drawing.Point($X, $Y)
     $panel.BackColor = [System.Drawing.Color]::White
     $panel.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
 
-    $nameLabel = New-CardLabel -Text $Card.Name -X 18 -Y 16 -Width 200 -Height 24 -Size 9.5 -Style ([System.Drawing.FontStyle]::Bold)
+    $nameLabel = New-CardLabel -Text $Card.Name -X 18 -Y 14 -Width 200 -Height 24 -Size 9.5 -Style ([System.Drawing.FontStyle]::Bold)
     $panel.Controls.Add($nameLabel)
 
-    $platformLabel = New-CardLabel -Text $Card.Platform -X 18 -Y 42 -Width 46 -Height 22 -Size 8
+    $platformLabel = New-CardLabel -Text $Card.Platform -X 18 -Y 40 -Width 46 -Height 22 -Size 8
     $platformLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
     $platformLabel.BackColor = [System.Drawing.Color]::FromArgb(230, 244, 255)
     $platformLabel.ForeColor = [System.Drawing.Color]::FromArgb(22, 119, 255)
     $panel.Controls.Add($platformLabel)
 
-    $installLabel = New-CardLabel -Text $Card.InstallStatus -X 245 -Y 18 -Width 82 -Height 22 -Size 8.5
+    $installLabel = New-CardLabel -Text $Card.InstallStatus -X 245 -Y 16 -Width 82 -Height 22 -Size 8.5
     $installLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
     $panel.Controls.Add($installLabel)
 
-    $currentTitle = New-CardLabel -Text (T "CurrentVersion") -X 18 -Y 76 -Width 84 -Height 20 -Size 8
-    $currentTitle.ForeColor = [System.Drawing.Color]::FromArgb(107, 114, 128)
-    $panel.Controls.Add($currentTitle)
-
-    $currentValue = New-CardLabel -Text $Card.CurrentVersion -X 212 -Y 76 -Width 116 -Height 20 -Size 8
-    $currentValue.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
-    $panel.Controls.Add($currentValue)
-
-    $latestTitle = New-CardLabel -Text (T "LatestVersion") -X 18 -Y 98 -Width 84 -Height 20 -Size 8
-    $latestTitle.ForeColor = [System.Drawing.Color]::FromArgb(107, 114, 128)
-    $panel.Controls.Add($latestTitle)
-
-    $latestValue = New-CardLabel -Text $Card.LatestVersion -X 212 -Y 98 -Width 116 -Height 20 -Size 8
-    $latestValue.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
-    $panel.Controls.Add($latestValue)
-
-    $detailLabel = New-CardLabel -Text $Card.Detail -X 18 -Y 122 -Width 210 -Height 20 -Size 8
+    $detailLabel = New-CardLabel -Text $Card.Detail -X 18 -Y 74 -Width 210 -Height 20 -Size 8
     $detailLabel.ForeColor = [System.Drawing.Color]::FromArgb(107, 114, 128)
     $panel.Controls.Add($detailLabel)
 
-    $actionButton = New-FlatButton -Text $Card.ActionText -X 248 -Y 120 -Width 80 -Height 26
+    $actionButton = New-FlatButton -Text $Card.ActionText -X 248 -Y 72 -Width 84 -Height 26
     $actionButton.Tag = $Card.Id
     $actionButton.Add_Click({ Configure-AgentToolFromUi -TargetId ([string]$this.Tag) })
     $panel.Controls.Add($actionButton)
@@ -2428,10 +2459,6 @@ function New-ToolCardControl {
         NameLabel = $nameLabel
         PlatformLabel = $platformLabel
         InstallLabel = $installLabel
-        CurrentTitle = $currentTitle
-        CurrentValue = $currentValue
-        LatestTitle = $latestTitle
-        LatestValue = $latestValue
         DetailLabel = $detailLabel
         ActionButton = $actionButton
     }
@@ -2456,19 +2483,16 @@ function Update-ToolCardControls {
         $control.NameLabel.Text = $card.Name
         $control.PlatformLabel.Text = $card.Platform
         $control.InstallLabel.Text = $card.InstallStatus
-        $control.CurrentTitle.Text = T "CurrentVersion"
-        $control.CurrentValue.Text = $card.CurrentVersion
-        $control.LatestTitle.Text = T "LatestVersion"
-        $control.LatestValue.Text = $card.LatestVersion
         $control.DetailLabel.Text = $card.Detail
         $control.ActionButton.Text = $card.ActionText
 
-        if ($card.Configured) {
+        # Install status uses exactly two colors: green = installed, gray = not
+        # installed. Configuration state is conveyed by the detail line, not by a
+        # third install-label color.
+        if ($card.Installed) {
             $control.InstallLabel.ForeColor = [System.Drawing.Color]::FromArgb(22, 163, 74)
-        } elseif ($card.Installed) {
-            $control.InstallLabel.ForeColor = [System.Drawing.Color]::FromArgb(217, 119, 6)
         } else {
-            $control.InstallLabel.ForeColor = [System.Drawing.Color]::FromArgb(107, 114, 128)
+            $control.InstallLabel.ForeColor = [System.Drawing.Color]::FromArgb(156, 163, 175)
         }
     }
 
@@ -2481,30 +2505,22 @@ function Update-ToolCardControls {
 try {
 
 $script:Form = New-Object System.Windows.Forms.Form
-$script:Form.Size = New-Object System.Drawing.Size(1180, 900)
+$script:Form.Size = New-Object System.Drawing.Size(1180, 820)
 $script:Form.StartPosition = "CenterScreen"
 $script:Form.FormBorderStyle = "FixedSingle"
 $script:Form.MaximizeBox = $false
 $script:Form.BackColor = [System.Drawing.Color]::FromArgb(250, 250, 250)
 
 $script:HeaderPanel = New-Object System.Windows.Forms.Panel
-$script:HeaderPanel.Size = New-Object System.Drawing.Size(1164, 78)
+$script:HeaderPanel.Size = New-Object System.Drawing.Size(1164, 60)
 $script:HeaderPanel.Location = New-Object System.Drawing.Point(0, 0)
 $script:HeaderPanel.BackColor = [System.Drawing.Color]::White
 $script:Form.Controls.Add($script:HeaderPanel)
 
-$script:BackButton = New-FlatButton -Text "<" -X 24 -Y 20 -Width 38 -Height 34
-$script:BackButton.Add_Click({
-    Update-Status
-    Update-AgentClientStatus
-    Set-ActionFeedback (T "Ready")
-})
-$script:HeaderPanel.Controls.Add($script:BackButton)
-
 $script:TitleLabel = New-Object System.Windows.Forms.Label
-$script:TitleLabel.Font = New-Object System.Drawing.Font("Segoe UI", 13, [System.Drawing.FontStyle]::Bold)
-$script:TitleLabel.Size = New-Object System.Drawing.Size(240, 34)
-$script:TitleLabel.Location = New-Object System.Drawing.Point(76, 23)
+$script:TitleLabel.Font = New-Object System.Drawing.Font("Segoe UI", 14, [System.Drawing.FontStyle]::Bold)
+$script:TitleLabel.Size = New-Object System.Drawing.Size(400, 36)
+$script:TitleLabel.Location = New-Object System.Drawing.Point(24, 14)
 $script:HeaderPanel.Controls.Add($script:TitleLabel)
 
 $script:LanguageBox = New-Object System.Windows.Forms.ComboBox
@@ -2513,114 +2529,100 @@ $script:LanguageBox.Items.Add("中文") | Out-Null
 $script:LanguageBox.Items.Add("English") | Out-Null
 $script:LanguageBox.SelectedIndex = 0
 $script:LanguageBox.Size = New-Object System.Drawing.Size(110, 26)
-$script:LanguageBox.Location = New-Object System.Drawing.Point(1024, 24)
+$script:LanguageBox.Location = New-Object System.Drawing.Point(1030, 16)
 $script:HeaderPanel.Controls.Add($script:LanguageBox)
 
-$script:NavPanel = New-Object System.Windows.Forms.Panel
-$script:NavPanel.Size = New-Object System.Drawing.Size(1120, 44)
-$script:NavPanel.Location = New-Object System.Drawing.Point(22, 88)
-$script:NavPanel.BackColor = [System.Drawing.Color]::White
-$script:NavPanel.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
-$script:Form.Controls.Add($script:NavPanel)
+# Tab navigation was removed: only the "About" view is implemented, so the
+# unfinished General/Route/Auth/Advanced/Usage tabs are no longer rendered.
+$script:NavButtons = $null
 
-$script:NavButtons = New-Object System.Collections.ArrayList
-for ($i = 0; $i -lt 6; $i++) {
-    $tabButton = New-FlatButton -Text "" -X (2 + ($i * 186)) -Y 5 -Width 178 -Height 32 -Primary:($i -eq 5)
-    if ($i -ne 5) {
-        $tabButton.Enabled = $false
-        $tabButton.ForeColor = [System.Drawing.Color]::FromArgb(156, 163, 175)
-    }
-    $script:NavPanel.Controls.Add($tabButton)
-    [void]$script:NavButtons.Add($tabButton)
-}
-
-$script:AboutHeadingLabel = New-CardLabel -Text "" -X 24 -Y 154 -Width 220 -Height 24 -Size 10.5 -Style ([System.Drawing.FontStyle]::Bold)
+$script:AboutHeadingLabel = New-CardLabel -Text "" -X 24 -Y 72 -Width 300 -Height 24 -Size 10.5 -Style ([System.Drawing.FontStyle]::Bold)
 $script:Form.Controls.Add($script:AboutHeadingLabel)
 
-$script:AboutDescriptionLabel = New-CardLabel -Text "" -X 24 -Y 180 -Width 520 -Height 22 -Size 8.5
+$script:AboutDescriptionLabel = New-CardLabel -Text "" -X 24 -Y 98 -Width 720 -Height 22 -Size 8.5
 $script:AboutDescriptionLabel.ForeColor = [System.Drawing.Color]::FromArgb(107, 114, 128)
 $script:Form.Controls.Add($script:AboutDescriptionLabel)
 
 $script:AboutPanel = New-Object System.Windows.Forms.Panel
-$script:AboutPanel.Size = New-Object System.Drawing.Size(1120, 108)
-$script:AboutPanel.Location = New-Object System.Drawing.Point(24, 216)
+$script:AboutPanel.Size = New-Object System.Drawing.Size(1132, 98)
+$script:AboutPanel.Location = New-Object System.Drawing.Point(24, 126)
 $script:AboutPanel.BackColor = [System.Drawing.Color]::White
 $script:AboutPanel.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
 $script:Form.Controls.Add($script:AboutPanel)
 
-$script:ProductNameLabel = New-CardLabel -Text "" -X 24 -Y 24 -Width 300 -Height 28 -Size 11 -Style ([System.Drawing.FontStyle]::Bold)
+$script:ProductNameLabel = New-CardLabel -Text "" -X 20 -Y 14 -Width 180 -Height 28 -Size 11 -Style ([System.Drawing.FontStyle]::Bold)
 $script:AboutPanel.Controls.Add($script:ProductNameLabel)
 
-$script:ProductVersionLabel = New-CardLabel -Text "" -X 24 -Y 58 -Width 180 -Height 22 -Size 8
+$script:ProductVersionLabel = New-CardLabel -Text "" -X 20 -Y 50 -Width 160 -Height 24 -Size 8
 $script:ProductVersionLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
 $script:ProductVersionLabel.BackColor = [System.Drawing.Color]::White
 $script:ProductVersionLabel.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
 $script:AboutPanel.Controls.Add($script:ProductVersionLabel)
 
 $script:NodeLabel = New-Object System.Windows.Forms.Label
-$script:NodeLabel.Size = New-Object System.Drawing.Size(210, 20)
-$script:NodeLabel.Location = New-Object System.Drawing.Point(246, 20)
+$script:NodeLabel.Size = New-Object System.Drawing.Size(198, 20)
+$script:NodeLabel.Location = New-Object System.Drawing.Point(232, 14)
 $script:NodeLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9)
 $script:AboutPanel.Controls.Add($script:NodeLabel)
 
 $script:AgentMemoryLabel = New-Object System.Windows.Forms.Label
-$script:AgentMemoryLabel.Size = New-Object System.Drawing.Size(210, 20)
-$script:AgentMemoryLabel.Location = New-Object System.Drawing.Point(246, 45)
+$script:AgentMemoryLabel.Size = New-Object System.Drawing.Size(198, 20)
+$script:AgentMemoryLabel.Location = New-Object System.Drawing.Point(232, 40)
 $script:AgentMemoryLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9)
 $script:AboutPanel.Controls.Add($script:AgentMemoryLabel)
 
 $script:IiiLabel = New-Object System.Windows.Forms.Label
-$script:IiiLabel.Size = New-Object System.Drawing.Size(210, 20)
-$script:IiiLabel.Location = New-Object System.Drawing.Point(246, 70)
+$script:IiiLabel.Size = New-Object System.Drawing.Size(198, 20)
+$script:IiiLabel.Location = New-Object System.Drawing.Point(232, 66)
 $script:IiiLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9)
 $script:AboutPanel.Controls.Add($script:IiiLabel)
 
 $script:ServiceLabel = New-Object System.Windows.Forms.Label
-$script:ServiceLabel.Size = New-Object System.Drawing.Size(210, 20)
-$script:ServiceLabel.Location = New-Object System.Drawing.Point(470, 45)
-$script:ServiceLabel.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
+$script:ServiceLabel.Size = New-Object System.Drawing.Size(170, 24)
+$script:ServiceLabel.Location = New-Object System.Drawing.Point(436, 38)
+$script:ServiceLabel.Font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
 $script:AboutPanel.Controls.Add($script:ServiceLabel)
 
-$script:BtnInstall = New-FlatButton -Text "" -X 700 -Y 16 -Width 94 -Height 28 -Primary
+# Action buttons: two rows of wide buttons on the right of the status panel.
+$script:BtnInstall = New-FlatButton -Text "" -X 616 -Y 14 -Width 122 -Height 28 -Primary
 $script:AboutPanel.Controls.Add($script:BtnInstall)
 
-$script:BtnStart = New-FlatButton -Text "" -X 802 -Y 16 -Width 94 -Height 28
-$script:AboutPanel.Controls.Add($script:BtnStart)
+$script:BtnStartStop = New-FlatButton -Text "" -X 746 -Y 14 -Width 122 -Height 28
+$script:AboutPanel.Controls.Add($script:BtnStartStop)
 
-$script:BtnStop = New-FlatButton -Text "" -X 904 -Y 16 -Width 94 -Height 28
-$script:AboutPanel.Controls.Add($script:BtnStop)
-
-$script:BtnMcp = New-FlatButton -Text "" -X 1006 -Y 16 -Width 94 -Height 28
+$script:BtnMcp = New-FlatButton -Text "" -X 876 -Y 14 -Width 122 -Height 28
 $script:AboutPanel.Controls.Add($script:BtnMcp)
 
-$script:BtnCopyCli = New-FlatButton -Text "" -X 700 -Y 58 -Width 94 -Height 28
+$script:BtnCopyCli = New-FlatButton -Text "" -X 1006 -Y 14 -Width 122 -Height 28
 $script:AboutPanel.Controls.Add($script:BtnCopyCli)
 
-$script:BtnSyncShared = New-FlatButton -Text "" -X 802 -Y 58 -Width 94 -Height 28
+$script:BtnSyncShared = New-FlatButton -Text "" -X 616 -Y 52 -Width 122 -Height 28
 $script:AboutPanel.Controls.Add($script:BtnSyncShared)
 
-$script:BtnWorkspaceBridge = New-FlatButton -Text "" -X 904 -Y 58 -Width 94 -Height 28
+$script:BtnWorkspaceBridge = New-FlatButton -Text "" -X 746 -Y 52 -Width 122 -Height 28
 $script:AboutPanel.Controls.Add($script:BtnWorkspaceBridge)
 
-$script:BtnMigrateHome = New-FlatButton -Text "" -X 1006 -Y 58 -Width 94 -Height 28
+$script:BtnMigrateHome = New-FlatButton -Text "" -X 876 -Y 52 -Width 122 -Height 28
 $script:AboutPanel.Controls.Add($script:BtnMigrateHome)
 
-$script:LocalEnvLabel = New-CardLabel -Text "" -X 24 -Y 356 -Width 240 -Height 26 -Size 10.5 -Style ([System.Drawing.FontStyle]::Bold)
+# Shows the current data directory and service log path so the user knows
+# exactly where data lives before deciding whether to migrate it.
+$script:DataPathLabel = New-CardLabel -Text "" -X 26 -Y 230 -Width 1106 -Height 20 -Size 8.5
+$script:DataPathLabel.ForeColor = [System.Drawing.Color]::FromArgb(107, 114, 128)
+$script:Form.Controls.Add($script:DataPathLabel)
+
+$script:LocalEnvLabel = New-CardLabel -Text "" -X 24 -Y 262 -Width 300 -Height 26 -Size 10.5 -Style ([System.Drawing.FontStyle]::Bold)
 $script:Form.Controls.Add($script:LocalEnvLabel)
 
-$script:BtnScanAgents = New-FlatButton -Text "" -X 828 -Y 350 -Width 96 -Height 28
+$script:BtnScanAgents = New-FlatButton -Text "" -X 948 -Y 258 -Width 92 -Height 28
 $script:Form.Controls.Add($script:BtnScanAgents)
 
-$script:BtnConfigureAgents = New-FlatButton -Text "" -X 934 -Y 350 -Width 96 -Height 28
+$script:BtnConfigureAgents = New-FlatButton -Text "" -X 1044 -Y 258 -Width 104 -Height 28 -Primary
 $script:Form.Controls.Add($script:BtnConfigureAgents)
 
-$script:BtnUpgradeAll = New-FlatButton -Text (T "UpgradeAll") -X 1040 -Y 350 -Width 104 -Height 28 -Primary
-$script:BtnUpgradeAll.Enabled = $false
-$script:Form.Controls.Add($script:BtnUpgradeAll)
-
 $script:ToolCardsPanel = New-Object System.Windows.Forms.Panel
-$script:ToolCardsPanel.Size = New-Object System.Drawing.Size(1120, 360)
-$script:ToolCardsPanel.Location = New-Object System.Drawing.Point(24, 390)
+$script:ToolCardsPanel.Size = New-Object System.Drawing.Size(1132, 308)
+$script:ToolCardsPanel.Location = New-Object System.Drawing.Point(24, 294)
 $script:ToolCardsPanel.BackColor = [System.Drawing.Color]::FromArgb(250, 250, 250)
 $script:ToolCardsPanel.AutoScroll = $true
 $script:Form.Controls.Add($script:ToolCardsPanel)
@@ -2632,35 +2634,35 @@ for ($i = 0; $i -lt $initialCards.Count; $i++) {
     $col = $i % 3
     $row = [math]::Floor($i / 3)
     $x = $col * 370
-    $y = $row * 172
+    $y = $row * 122
     $cardControl = New-ToolCardControl -Card $initialCards[$i] -X $x -Y $y
     $script:ToolCardsPanel.Controls.Add($cardControl.Panel)
     [void]$script:ToolCardControls.Add($cardControl)
 }
 
 $script:ActionGroup = New-Object System.Windows.Forms.GroupBox
-$script:ActionGroup.Size = New-Object System.Drawing.Size(570, 58)
-$script:ActionGroup.Location = New-Object System.Drawing.Point(24, 766)
+$script:ActionGroup.Size = New-Object System.Drawing.Size(548, 150)
+$script:ActionGroup.Location = New-Object System.Drawing.Point(24, 606)
 $script:Form.Controls.Add($script:ActionGroup)
 
 $script:ActionLabel = New-Object System.Windows.Forms.Label
-$script:ActionLabel.Size = New-Object System.Drawing.Size(535, 28)
-$script:ActionLabel.Location = New-Object System.Drawing.Point(14, 22)
+$script:ActionLabel.Size = New-Object System.Drawing.Size(520, 116)
+$script:ActionLabel.Location = New-Object System.Drawing.Point(14, 24)
 $script:ActionLabel.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
 $script:ActionGroup.Controls.Add($script:ActionLabel)
 
 $script:LogGroup = New-Object System.Windows.Forms.GroupBox
-$script:LogGroup.Size = New-Object System.Drawing.Size(530, 58)
-$script:LogGroup.Location = New-Object System.Drawing.Point(614, 766)
+$script:LogGroup.Size = New-Object System.Drawing.Size(572, 150)
+$script:LogGroup.Location = New-Object System.Drawing.Point(584, 606)
 $script:Form.Controls.Add($script:LogGroup)
 
 $script:LogBox = New-Object System.Windows.Forms.TextBox
 $script:LogBox.Multiline = $true
 $script:LogBox.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
 $script:LogBox.ReadOnly = $true
-$script:LogBox.Font = New-Object System.Drawing.Font("Consolas", 8)
-$script:LogBox.Size = New-Object System.Drawing.Size(506, 30)
-$script:LogBox.Location = New-Object System.Drawing.Point(12, 20)
+$script:LogBox.Font = New-Object System.Drawing.Font("Consolas", 8.5)
+$script:LogBox.Size = New-Object System.Drawing.Size(548, 116)
+$script:LogBox.Location = New-Object System.Drawing.Point(12, 22)
 $script:LogBox.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
 $script:LogBox.ForeColor = [System.Drawing.Color]::FromArgb(200, 255, 200)
 $script:LogGroup.Controls.Add($script:LogBox)
@@ -2678,8 +2680,15 @@ $script:LanguageBox.Add_SelectedIndexChanged({
 })
 
 $script:BtnInstall.Add_Click({ Install-All })
-$script:BtnStart.Add_Click({ Start-AgentMemory })
-$script:BtnStop.Add_Click({ Stop-AgentMemory })
+$script:BtnStartStop.Add_Click({
+    # Single toggle button: stop when the service is up, otherwise start it.
+    if (Test-ServiceRunning) {
+        Stop-AgentMemory
+    } else {
+        Start-AgentMemory
+    }
+    Update-Status
+})
 $script:BtnMcp.Add_Click({ Copy-McpConfig })
 $script:BtnScanAgents.Add_Click({ Scan-AgentClients })
 $script:BtnConfigureAgents.Add_Click({ Configure-AgentClients })
