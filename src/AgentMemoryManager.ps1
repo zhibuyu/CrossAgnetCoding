@@ -18,6 +18,9 @@ $script:NPM_GLOBAL = Join-Path $env:APPDATA "npm"
 $script:APP_NAME = "CrossAgnetCoding"
 $script:APP_VERSION = "0.3.0-mvp"
 $script:PORT = 3111
+$script:STREAMS_PORT = 3112
+$script:VIEWER_PORT = 3113
+$script:HF_MIRROR_URL = "https://hf-mirror.com"
 $script:Language = "zh"
 $script:IsBusy = $false
 $script:CliExitCode = 0
@@ -48,6 +51,18 @@ $script:Text = @{
         StartService = "启动服务"
         StopService = "停止服务"
         CopyMcp = "复制 MCP 配置"
+        OpenViewer = "打开记忆查看器"
+        MemorySettings = "记忆设置"
+        CheckStatus = "检查状态"
+        ViewerNotRunning = "服务未运行，请先启动服务再打开查看器"
+        StatusRequested = "正在查询 AgentMemory 状态…"
+        StatusServiceDown = "服务未运行，无法查询状态。请先启动服务。"
+        MemorySettingsSaved = "记忆设置已保存，重启服务后生效"
+        InstallingLocalEmbedding = "正在安装本地向量依赖 (@xenova/transformers)，请稍候…"
+        LocalEmbeddingInstalled = "本地向量依赖安装完成，重启服务后即可使用本地语义检索"
+        LocalEmbeddingInstallFail = "本地向量依赖安装失败：{0}"
+        LocalEmbeddingReady = "本地向量依赖已就绪"
+        PortsInfo = "服务端口：REST {0} · 流 {1} · 查看器 {2}"
         CodingAgentAccess = "Coding Agent 接入"
         ScanAgents = "刷新"
         ConfigureAgents = "一键配置 MCP"
@@ -161,6 +176,18 @@ $script:Text = @{
         StartService = "Start Service"
         StopService = "Stop Service"
         CopyMcp = "Copy MCP Config"
+        OpenViewer = "Open Memory Viewer"
+        MemorySettings = "Memory Settings"
+        CheckStatus = "Check Status"
+        ViewerNotRunning = "Service is not running. Start it before opening the viewer."
+        StatusRequested = "Querying AgentMemory status…"
+        StatusServiceDown = "Service is not running, cannot query status. Start it first."
+        MemorySettingsSaved = "Memory settings saved. Restart the service to apply."
+        InstallingLocalEmbedding = "Installing local embedding dependency (@xenova/transformers)…"
+        LocalEmbeddingInstalled = "Local embedding dependency installed. Restart the service to use local semantic search."
+        LocalEmbeddingInstallFail = "Local embedding dependency install failed: {0}"
+        LocalEmbeddingReady = "Local embedding dependency is ready"
+        PortsInfo = "Ports: REST {0} · Streams {1} · Viewer {2}"
         CodingAgentAccess = "Coding Agent Access"
         ScanAgents = "Refresh"
         ConfigureAgents = "Configure MCP"
@@ -1059,6 +1086,144 @@ function Write-CrossAgnetCodingSettings {
     return $path
 }
 
+function Get-MemorySettings {
+    # Reads the optional "memory" object from CrossAgnetCoding settings.json and
+    # fills in safe defaults. Defaults keep AgentMemory zero-config: keyword-only
+    # (BM25) search, no LLM provider, the 7-tool core surface.
+    $settings = Read-CrossAgnetCodingSettings
+    $memory = $null
+    if ($settings.PSObject.Properties.Name -contains "memory") {
+        $memory = $settings.memory
+    }
+
+    function Get-Prop {
+        param($Obj, [string]$Name, $Default)
+        if ($null -ne $Obj -and ($Obj.PSObject.Properties.Name -contains $Name) -and $null -ne $Obj.$Name -and -not [string]::IsNullOrWhiteSpace([string]$Obj.$Name)) {
+            return $Obj.$Name
+        }
+        return $Default
+    }
+
+    return [pscustomobject]@{
+        EmbeddingMode     = [string](Get-Prop $memory "embeddingMode" "keyword")   # keyword | local | cloud
+        EmbeddingProvider = [string](Get-Prop $memory "embeddingProvider" "openai") # openai|gemini|voyage|cohere|openrouter
+        EmbeddingApiKey   = [string](Get-Prop $memory "embeddingApiKey" "")
+        LlmProvider       = [string](Get-Prop $memory "llmProvider" "none")         # none|openai|minimax|anthropic|gemini|openrouter
+        LlmApiKey         = [string](Get-Prop $memory "llmApiKey" "")
+        Tools             = [string](Get-Prop $memory "tools" "core")               # core | all
+        UseHfMirror       = [bool](Get-Prop $memory "useHfMirror" $true)
+    }
+}
+
+function Save-MemorySettings {
+    param([object]$Memory)
+
+    $settings = Read-CrossAgnetCodingSettings
+    $obj = [ordered]@{
+        embeddingMode     = [string]$Memory.EmbeddingMode
+        embeddingProvider = [string]$Memory.EmbeddingProvider
+        embeddingApiKey   = [string]$Memory.EmbeddingApiKey
+        llmProvider       = [string]$Memory.LlmProvider
+        llmApiKey         = [string]$Memory.LlmApiKey
+        tools             = [string]$Memory.Tools
+        useHfMirror       = [bool]$Memory.UseHfMirror
+    }
+    $settings | Add-Member -NotePropertyName "memory" -NotePropertyValue ([pscustomobject]$obj) -Force
+    return (Write-CrossAgnetCodingSettings -Settings $settings)
+}
+
+function Get-ProviderKeyEnvName {
+    param([string]$Provider)
+
+    switch ($Provider) {
+        "openai"     { return "OPENAI_API_KEY" }
+        "gemini"     { return "GEMINI_API_KEY" }
+        "anthropic"  { return "ANTHROPIC_API_KEY" }
+        "minimax"    { return "MINIMAX_API_KEY" }
+        "openrouter" { return "OPENROUTER_API_KEY" }
+        "voyage"     { return "VOYAGE_API_KEY" }
+        "cohere"     { return "COHERE_API_KEY" }
+        default      { return "" }
+    }
+}
+
+function Get-MemoryEnvMap {
+    # Translates the saved memory settings into the AgentMemory environment
+    # variables the service reads at startup. Every variable this manager owns is
+    # always present in the map (value or empty) so Apply-MemoryEnv can both set
+    # and clear them when the user toggles options off.
+    $m = Get-MemorySettings
+    $map = [ordered]@{
+        EMBEDDING_PROVIDER = ""
+        OPENAI_API_KEY     = ""
+        GEMINI_API_KEY     = ""
+        ANTHROPIC_API_KEY  = ""
+        MINIMAX_API_KEY    = ""
+        OPENROUTER_API_KEY = ""
+        VOYAGE_API_KEY     = ""
+        COHERE_API_KEY     = ""
+        AGENTMEMORY_TOOLS  = ""
+        HF_ENDPOINT        = ""
+    }
+
+    # Embedding leg of hybrid search.
+    if ($m.EmbeddingMode -eq "local") {
+        $map["EMBEDDING_PROVIDER"] = "local"
+        if ($m.UseHfMirror) {
+            $map["HF_ENDPOINT"] = $script:HF_MIRROR_URL
+        }
+    } elseif ($m.EmbeddingMode -eq "cloud") {
+        $map["EMBEDDING_PROVIDER"] = $m.EmbeddingProvider
+        $keyName = Get-ProviderKeyEnvName -Provider $m.EmbeddingProvider
+        if ($keyName -and -not [string]::IsNullOrWhiteSpace($m.EmbeddingApiKey)) {
+            $map[$keyName] = $m.EmbeddingApiKey
+        }
+    }
+    # keyword mode leaves EMBEDDING_PROVIDER empty so AgentMemory stays BM25-only.
+
+    # LLM provider for compression / summarization / graph features.
+    if ($m.LlmProvider -and $m.LlmProvider -ne "none") {
+        $keyName = Get-ProviderKeyEnvName -Provider $m.LlmProvider
+        if ($keyName -and -not [string]::IsNullOrWhiteSpace($m.LlmApiKey)) {
+            $map[$keyName] = $m.LlmApiKey
+        }
+    }
+
+    if ($m.Tools -eq "all") {
+        $map["AGENTMEMORY_TOOLS"] = "all"
+    } else {
+        $map["AGENTMEMORY_TOOLS"] = "core"
+    }
+
+    return $map
+}
+
+function Apply-MemoryEnv {
+    # Pushes the memory env map into the current process so the AgentMemory
+    # service (launched as a child with inherited environment) picks it up.
+    $map = Get-MemoryEnvMap
+    foreach ($name in $map.Keys) {
+        $value = [string]$map[$name]
+        if ([string]::IsNullOrWhiteSpace($value)) {
+            Remove-Item -LiteralPath ("Env:" + $name) -ErrorAction SilentlyContinue
+        } else {
+            Set-Item -LiteralPath ("Env:" + $name) -Value $value
+        }
+    }
+}
+
+function Get-AgentMemoryCliPath {
+    return (Join-Path $script:NPM_GLOBAL "agentmemory.cmd")
+}
+
+function Get-XenovaTransformersPath {
+    return (Join-Path $script:NPM_GLOBAL "node_modules\@xenova\transformers")
+}
+
+function Test-LocalEmbeddingReady {
+    return (Test-Path -LiteralPath (Get-XenovaTransformersPath))
+}
+
 function Get-CrossAgnetCodingHome {
     if (-not [string]::IsNullOrWhiteSpace($env:CROSSAGNETCODING_HOME)) {
         return [System.IO.Path]::GetFullPath($env:CROSSAGNETCODING_HOME)
@@ -1548,6 +1713,25 @@ function Invoke-CliMode {
     } elseif ($command -eq "config home") {
         Write-Output (Get-CrossAgnetCodingHome)
         return
+    } elseif ($command -eq "memory show") {
+        $m = Get-MemorySettings
+        Write-Output "embeddingMode: $($m.EmbeddingMode)"
+        Write-Output "embeddingProvider: $($m.EmbeddingProvider)"
+        Write-Output "embeddingApiKey: $(if ($m.EmbeddingApiKey) { '***set***' } else { '(empty)' })"
+        Write-Output "llmProvider: $($m.LlmProvider)"
+        Write-Output "llmApiKey: $(if ($m.LlmApiKey) { '***set***' } else { '(empty)' })"
+        Write-Output "tools: $($m.Tools)"
+        Write-Output "useHfMirror: $($m.UseHfMirror)"
+        Write-Output "localEmbeddingReady: $(Test-LocalEmbeddingReady)"
+        return
+    } elseif ($command -eq "memory env") {
+        $map = Get-MemoryEnvMap
+        foreach ($name in $map.Keys) {
+            $value = [string]$map[$name]
+            if ($name -match "API_KEY" -and -not [string]::IsNullOrWhiteSpace($value)) { $value = "***set***" }
+            Write-Output "$name=$value"
+        }
+        return
     } elseif ($command -match "^config migrate ") {
         if ($CliArgs.Count -lt 3) {
             Write-Error "config migrate requires a target path"
@@ -1878,6 +2062,9 @@ function Set-Busy {
     $script:BtnInstall.Enabled = -not $Busy
     $script:BtnStartStop.Enabled = -not $Busy
     $script:BtnMcp.Enabled = -not $Busy
+    $script:BtnViewer.Enabled = -not $Busy
+    $script:BtnMemorySettings.Enabled = -not $Busy
+    $script:BtnCheckStatus.Enabled = -not $Busy
     $script:BtnScanAgents.Enabled = -not $Busy
     $script:BtnConfigureAgents.Enabled = -not $Busy
     $script:BtnCopyCli.Enabled = -not $Busy
@@ -1904,6 +2091,9 @@ function Apply-Language {
         $script:BtnStartStop.Text = T "StartService"
     }
     $script:BtnMcp.Text = T "CopyMcp"
+    $script:BtnViewer.Text = T "OpenViewer"
+    $script:BtnMemorySettings.Text = T "MemorySettings"
+    $script:BtnCheckStatus.Text = T "CheckStatus"
     $script:BtnScanAgents.Text = T "ScanAgents"
     $script:BtnConfigureAgents.Text = T "ConfigureAll"
     $script:BtnCopyCli.Text = T "CopyCli"
@@ -1921,7 +2111,9 @@ function Update-DataPathLabel {
 
     $dataHome = Get-CrossAgnetCodingHome
     $serviceLog = Join-Path $script:AM_DIR "agentmemory-service.log"
-    $script:DataPathLabel.Text = T "DataPathInfo" @($dataHome, $serviceLog)
+    $line1 = T "DataPathInfo" @($dataHome, $serviceLog)
+    $line2 = T "PortsInfo" @($script:PORT, $script:STREAMS_PORT, $script:VIEWER_PORT)
+    $script:DataPathLabel.Text = $line1 + "`r`n" + $line2
 }
 
 function Update-Status {
@@ -2145,6 +2337,7 @@ function Start-AgentMemory {
         }
 
         Set-ManagerEnv
+        Apply-MemoryEnv
         New-Item -ItemType Directory -Path $script:AM_DIR -Force | Out-Null
         Remove-Item -LiteralPath (Join-Path $script:AM_DIR "iii.pid") -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath (Join-Path $script:AM_DIR "engine-state.json") -Force -ErrorAction SilentlyContinue
@@ -2245,10 +2438,241 @@ function Copy-McpConfig {
     [System.Windows.Forms.MessageBox]::Show((T "CopyOkBody"), (T "CopyOkTitle"), "OK", "Information") | Out-Null
 }
 
+function Open-MemoryViewer {
+    # The AgentMemory service serves a web viewer at REST port + 2 (3113). It is
+    # the visual way to browse/inspect the shared memory all agents read & write.
+    if (-not (Test-ServiceRunning)) {
+        Set-ActionFeedback (T "ViewerNotRunning") ([System.Drawing.Color]::DarkOrange)
+        Write-Log (T "ViewerNotRunning")
+        return
+    }
+
+    $url = "http://localhost:$script:VIEWER_PORT"
+    Start-Process $url | Out-Null
+    Write-Log "Viewer: $url"
+    Set-ActionFeedback ("Viewer: $url") ([System.Drawing.Color]::DarkGreen)
+}
+
+function Show-MemoryStatus {
+    if (-not (Test-ServiceRunning)) {
+        Set-ActionFeedback (T "StatusServiceDown") ([System.Drawing.Color]::DarkOrange)
+        Write-Log (T "StatusServiceDown")
+        return
+    }
+
+    Set-Busy $true
+    Set-ActionFeedback (T "StatusRequested") ([System.Drawing.Color]::DarkOrange)
+    Write-Log (T "StatusRequested")
+    try {
+        Set-ManagerEnv
+        $cli = Get-AgentMemoryCliPath
+        $result = Invoke-HiddenProcess -FilePath "cmd.exe" -Arguments ("/d /c `"`"" + $cli + "`" status`"") -Wait -TimeoutSeconds 60
+        $text = [string]$result.Output + "`n" + [string]$result.Error
+        foreach ($line in ($text -split "`r?`n")) {
+            # Drop the CLI's box-drawing / status glyphs so the log stays readable.
+            $clean = ($line -replace '[─-╿■-◿✓✗│└├╭╮╯╰]', '').Trim()
+            if (-not [string]::IsNullOrWhiteSpace($clean)) {
+                Write-Log $clean
+            }
+        }
+        Set-ActionFeedback (T "Ready") ([System.Drawing.Color]::DarkGreen)
+    } catch {
+        Set-ActionFeedback $_.Exception.Message ([System.Drawing.Color]::Red)
+        Write-Log $_.Exception.Message
+    } finally {
+        Set-Busy $false
+    }
+}
+
+function Install-LocalEmbedding {
+    # Local semantic search needs @xenova/transformers (Transformers.js). It is an
+    # optional dependency npm may skip, so install it globally where AgentMemory
+    # can resolve it (alongside the already-present onnxruntime-node).
+    if (Test-LocalEmbeddingReady) {
+        Set-ActionFeedback (T "LocalEmbeddingReady") ([System.Drawing.Color]::DarkGreen)
+        Write-Log (T "LocalEmbeddingReady")
+        return $true
+    }
+
+    Set-Busy $true
+    Set-ActionFeedback (T "InstallingLocalEmbedding") ([System.Drawing.Color]::DarkOrange)
+    Write-Log (T "InstallingLocalEmbedding")
+    try {
+        Set-ManagerEnv
+        $result = Invoke-HiddenProcess -FilePath "cmd.exe" -Arguments "/d /c npm install -g @xenova/transformers" -Wait -TimeoutSeconds 900
+        if ($result.ExitCode -eq 0 -and (Test-LocalEmbeddingReady)) {
+            Set-ActionFeedback (T "LocalEmbeddingInstalled") ([System.Drawing.Color]::DarkGreen)
+            Write-Log (T "LocalEmbeddingInstalled")
+            return $true
+        }
+
+        $detail = if ($result.Error) { $result.Error.Trim() } else { "exit $($result.ExitCode)" }
+        Set-ActionFeedback (T "LocalEmbeddingInstallFail" @($detail)) ([System.Drawing.Color]::Red)
+        Write-Log (T "LocalEmbeddingInstallFail" @($detail))
+        return $false
+    } catch {
+        Set-ActionFeedback (T "LocalEmbeddingInstallFail" @($_.Exception.Message)) ([System.Drawing.Color]::Red)
+        Write-Log (T "LocalEmbeddingInstallFail" @($_.Exception.Message))
+        return $false
+    } finally {
+        Set-Busy $false
+    }
+}
+
 function Scan-AgentClients {
     Update-AgentClientStatus
     Set-ActionFeedback (T "AgentScanDone") ([System.Drawing.Color]::DarkGreen)
     Write-Log (T "AgentScanDone")
+}
+
+function Show-MemorySettingsDialog {
+    $isEn = ($script:Language -eq "en")
+    $m = Get-MemorySettings
+
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text = T "MemorySettings"
+    $dlg.Size = New-Object System.Drawing.Size(560, 524)
+    $dlg.StartPosition = "CenterParent"
+    $dlg.FormBorderStyle = "FixedDialog"
+    $dlg.MaximizeBox = $false
+    $dlg.MinimizeBox = $false
+    $dlg.BackColor = [System.Drawing.Color]::White
+
+    $addLabel = {
+        param([string]$Text, [int]$X, [int]$Y, [int]$W, [int]$H = 22, [bool]$Bold = $false, [bool]$Gray = $false)
+        $lb = New-Object System.Windows.Forms.Label
+        $lb.Text = $Text
+        $lb.Location = New-Object System.Drawing.Point($X, $Y)
+        $lb.Size = New-Object System.Drawing.Size($W, $H)
+        $fs = if ($Bold) { [System.Drawing.FontStyle]::Bold } else { [System.Drawing.FontStyle]::Regular }
+        $lb.Font = New-Object System.Drawing.Font("Segoe UI", 9, $fs)
+        if ($Gray) { $lb.ForeColor = [System.Drawing.Color]::FromArgb(107, 114, 128) }
+        $dlg.Controls.Add($lb)
+        return $lb
+    }
+    $addCombo = {
+        param([string[]]$Items, [int]$X, [int]$Y, [int]$W)
+        $cb = New-Object System.Windows.Forms.ComboBox
+        $cb.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList
+        $cb.Location = New-Object System.Drawing.Point($X, $Y)
+        $cb.Size = New-Object System.Drawing.Size($W, 24)
+        foreach ($it in $Items) { [void]$cb.Items.Add($it) }
+        $dlg.Controls.Add($cb)
+        return $cb
+    }
+    $addText = {
+        param([int]$X, [int]$Y, [int]$W, [string]$Value)
+        $tb = New-Object System.Windows.Forms.TextBox
+        $tb.Location = New-Object System.Drawing.Point($X, $Y)
+        $tb.Size = New-Object System.Drawing.Size($W, 24)
+        $tb.Text = $Value
+        $dlg.Controls.Add($tb)
+        return $tb
+    }
+
+    # Value arrays parallel to the localized combo items.
+    $modeValues = @("keyword", "local", "cloud")
+    $embProviderValues = @("openai", "gemini", "voyage", "cohere", "openrouter")
+    $llmValues = @("none", "openai", "minimax", "anthropic", "gemini", "openrouter")
+    $toolValues = @("core", "all")
+
+    # Section 1: embedding / semantic search
+    [void](& $addLabel ($(if ($isEn) { "1. Semantic search (vectors)" } else { "① 语义检索（向量）" })) 20 16 500 22 $true)
+    [void](& $addLabel ($(if ($isEn) { "Search mode" } else { "检索方式" })) 20 48 150)
+    $cmbMode = & $addCombo @($(if ($isEn) { @("Keyword only (BM25)", "Local MiniLM (offline)", "Cloud API (needs key)") } else { @("纯关键词 BM25（零配置）", "本地 MiniLM（离线语义）", "云端 API（需 Key）") })) 180 46 330
+
+    [void](& $addLabel ($(if ($isEn) { "Cloud provider" } else { "云端提供方" })) 20 82 150)
+    $cmbEmbProvider = & $addCombo @("OpenAI", "Gemini", "Voyage", "Cohere", "OpenRouter") 180 80 200
+
+    [void](& $addLabel ($(if ($isEn) { "Embedding key" } else { "Embedding Key" })) 20 116 150)
+    $txtEmbKey = & $addText 180 114 330 $m.EmbeddingApiKey
+
+    $chkHfMirror = New-Object System.Windows.Forms.CheckBox
+    $chkHfMirror.Text = $(if ($isEn) { "Download local model via hf-mirror.com" } else { "本地模型走 hf-mirror.com 镜像下载（国内更快）" })
+    $chkHfMirror.Location = New-Object System.Drawing.Point(180, 148)
+    $chkHfMirror.Size = New-Object System.Drawing.Size(340, 22)
+    $chkHfMirror.Checked = $m.UseHfMirror
+    $dlg.Controls.Add($chkHfMirror)
+
+    $btnInstallLocal = New-Object System.Windows.Forms.Button
+    $btnInstallLocal.Text = $(if ($isEn) { "Install local deps" } else { "安装本地向量依赖" })
+    $btnInstallLocal.Location = New-Object System.Drawing.Point(180, 176)
+    $btnInstallLocal.Size = New-Object System.Drawing.Size(150, 28)
+    $btnInstallLocal.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+    $dlg.Controls.Add($btnInstallLocal)
+    $lblLocalStatus = & $addLabel "" 340 180 180 22 $false $true
+
+    $refreshLocalStatus = {
+        if (Test-LocalEmbeddingReady) {
+            $lblLocalStatus.Text = $(if ($isEn) { "ready" } else { "已就绪" })
+            $lblLocalStatus.ForeColor = [System.Drawing.Color]::FromArgb(22, 163, 74)
+        } else {
+            $lblLocalStatus.Text = $(if ($isEn) { "not installed" } else { "未安装" })
+            $lblLocalStatus.ForeColor = [System.Drawing.Color]::FromArgb(217, 119, 6)
+        }
+    }
+    & $refreshLocalStatus
+    $btnInstallLocal.Add_Click({ [void](Install-LocalEmbedding); & $refreshLocalStatus })
+
+    # Section 2: LLM provider (optional)
+    [void](& $addLabel ($(if ($isEn) { "2. LLM smart compression (optional)" } else { "② LLM 智能压缩（可选）" })) 20 220 500 22 $true)
+    [void](& $addLabel ($(if ($isEn) { "LLM provider" } else { "LLM 提供方" })) 20 252 150)
+    $cmbLlm = & $addCombo @($(if ($isEn) { @("None", "OpenAI", "MiniMax", "Anthropic", "Gemini", "OpenRouter") } else { @("不使用", "OpenAI", "MiniMax", "Anthropic", "Gemini", "OpenRouter") })) 180 250 200
+    [void](& $addLabel "LLM Key" 20 286 150)
+    $txtLlmKey = & $addText 180 284 330 $m.LlmApiKey
+
+    # Section 3: MCP tool surface
+    [void](& $addLabel ($(if ($isEn) { "3. MCP tool surface" } else { "③ MCP 工具集" })) 20 322 500 22 $true)
+    [void](& $addLabel ($(if ($isEn) { "Tools exposed" } else { "暴露给工具的工具集" })) 20 354 150)
+    $cmbTools = & $addCombo @($(if ($isEn) { @("core (7 tools, default)", "all (51 tools)") } else { @("core（7 个工具，默认）", "all（51 个工具）") })) 180 352 250
+
+    [void](& $addLabel ($(if ($isEn) { "Settings are saved locally and applied to AgentMemory after you restart the service. Keys stay on this machine." } else { "说明：以上设置保存在本机，启动/重启服务后对 AgentMemory 生效；Key 仅保存在本地 settings.json。" })) 20 388 500 40 $false $true)
+
+    # Initial selections
+    $cmbMode.SelectedIndex = [Math]::Max(0, [Array]::IndexOf($modeValues, $m.EmbeddingMode))
+    $cmbEmbProvider.SelectedIndex = [Math]::Max(0, [Array]::IndexOf($embProviderValues, $m.EmbeddingProvider))
+    $cmbLlm.SelectedIndex = [Math]::Max(0, [Array]::IndexOf($llmValues, $m.LlmProvider))
+    $cmbTools.SelectedIndex = [Math]::Max(0, [Array]::IndexOf($toolValues, $m.Tools))
+
+    $btnCancel = New-Object System.Windows.Forms.Button
+    $btnCancel.Text = $(if ($isEn) { "Cancel" } else { "取消" })
+    $btnCancel.Location = New-Object System.Drawing.Point(330, 442)
+    $btnCancel.Size = New-Object System.Drawing.Size(90, 30)
+    $btnCancel.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+    $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
+    $dlg.Controls.Add($btnCancel)
+
+    $btnSave = New-Object System.Windows.Forms.Button
+    $btnSave.Text = $(if ($isEn) { "Save" } else { "保存" })
+    $btnSave.Location = New-Object System.Drawing.Point(428, 442)
+    $btnSave.Size = New-Object System.Drawing.Size(90, 30)
+    $btnSave.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+    $btnSave.BackColor = [System.Drawing.Color]::FromArgb(24, 144, 255)
+    $btnSave.ForeColor = [System.Drawing.Color]::White
+    $dlg.Controls.Add($btnSave)
+    $dlg.AcceptButton = $btnSave
+    $dlg.CancelButton = $btnCancel
+
+    $btnSave.Add_Click({
+        $saved = [pscustomobject]@{
+            EmbeddingMode     = $modeValues[$cmbMode.SelectedIndex]
+            EmbeddingProvider = $embProviderValues[$cmbEmbProvider.SelectedIndex]
+            EmbeddingApiKey   = $txtEmbKey.Text.Trim()
+            LlmProvider       = $llmValues[$cmbLlm.SelectedIndex]
+            LlmApiKey         = $txtLlmKey.Text.Trim()
+            Tools             = $toolValues[$cmbTools.SelectedIndex]
+            UseHfMirror       = [bool]$chkHfMirror.Checked
+        }
+        [void](Save-MemorySettings -Memory $saved)
+        $dlg.DialogResult = [System.Windows.Forms.DialogResult]::OK
+        $dlg.Close()
+    })
+
+    if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        Set-ActionFeedback (T "MemorySettingsSaved") ([System.Drawing.Color]::DarkGreen)
+        Write-Log (T "MemorySettingsSaved")
+    }
+    $dlg.Dispose()
 }
 
 function Configure-AgentClients {
@@ -2505,7 +2929,7 @@ function Update-ToolCardControls {
 try {
 
 $script:Form = New-Object System.Windows.Forms.Form
-$script:Form.Size = New-Object System.Drawing.Size(1180, 820)
+$script:Form.Size = New-Object System.Drawing.Size(1180, 852)
 $script:Form.StartPosition = "CenterScreen"
 $script:Form.FormBorderStyle = "FixedSingle"
 $script:Form.MaximizeBox = $false
@@ -2544,7 +2968,7 @@ $script:AboutDescriptionLabel.ForeColor = [System.Drawing.Color]::FromArgb(107, 
 $script:Form.Controls.Add($script:AboutDescriptionLabel)
 
 $script:AboutPanel = New-Object System.Windows.Forms.Panel
-$script:AboutPanel.Size = New-Object System.Drawing.Size(1132, 98)
+$script:AboutPanel.Size = New-Object System.Drawing.Size(1132, 124)
 $script:AboutPanel.Location = New-Object System.Drawing.Point(24, 126)
 $script:AboutPanel.BackColor = [System.Drawing.Color]::White
 $script:AboutPanel.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
@@ -2583,46 +3007,56 @@ $script:ServiceLabel.Location = New-Object System.Drawing.Point(436, 38)
 $script:ServiceLabel.Font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
 $script:AboutPanel.Controls.Add($script:ServiceLabel)
 
-# Action buttons: two rows of wide buttons on the right of the status panel.
-$script:BtnInstall = New-FlatButton -Text "" -X 616 -Y 14 -Width 122 -Height 28 -Primary
+# Action buttons: three rows of wide buttons on the right of the status panel.
+# Row 1 = service, Row 2 = connect/memory, Row 3 = workspace/data.
+$script:BtnInstall = New-FlatButton -Text "" -X 616 -Y 12 -Width 122 -Height 28 -Primary
 $script:AboutPanel.Controls.Add($script:BtnInstall)
 
-$script:BtnStartStop = New-FlatButton -Text "" -X 746 -Y 14 -Width 122 -Height 28
+$script:BtnStartStop = New-FlatButton -Text "" -X 746 -Y 12 -Width 122 -Height 28
 $script:AboutPanel.Controls.Add($script:BtnStartStop)
 
-$script:BtnMcp = New-FlatButton -Text "" -X 876 -Y 14 -Width 122 -Height 28
+$script:BtnCheckStatus = New-FlatButton -Text "" -X 876 -Y 12 -Width 122 -Height 28
+$script:AboutPanel.Controls.Add($script:BtnCheckStatus)
+
+$script:BtnViewer = New-FlatButton -Text "" -X 1006 -Y 12 -Width 122 -Height 28
+$script:AboutPanel.Controls.Add($script:BtnViewer)
+
+$script:BtnMcp = New-FlatButton -Text "" -X 616 -Y 48 -Width 122 -Height 28
 $script:AboutPanel.Controls.Add($script:BtnMcp)
 
-$script:BtnCopyCli = New-FlatButton -Text "" -X 1006 -Y 14 -Width 122 -Height 28
+$script:BtnCopyCli = New-FlatButton -Text "" -X 746 -Y 48 -Width 122 -Height 28
 $script:AboutPanel.Controls.Add($script:BtnCopyCli)
 
-$script:BtnSyncShared = New-FlatButton -Text "" -X 616 -Y 52 -Width 122 -Height 28
+$script:BtnMemorySettings = New-FlatButton -Text "" -X 876 -Y 48 -Width 122 -Height 28
+$script:AboutPanel.Controls.Add($script:BtnMemorySettings)
+
+$script:BtnSyncShared = New-FlatButton -Text "" -X 616 -Y 84 -Width 122 -Height 28
 $script:AboutPanel.Controls.Add($script:BtnSyncShared)
 
-$script:BtnWorkspaceBridge = New-FlatButton -Text "" -X 746 -Y 52 -Width 122 -Height 28
+$script:BtnWorkspaceBridge = New-FlatButton -Text "" -X 746 -Y 84 -Width 122 -Height 28
 $script:AboutPanel.Controls.Add($script:BtnWorkspaceBridge)
 
-$script:BtnMigrateHome = New-FlatButton -Text "" -X 876 -Y 52 -Width 122 -Height 28
+$script:BtnMigrateHome = New-FlatButton -Text "" -X 876 -Y 84 -Width 122 -Height 28
 $script:AboutPanel.Controls.Add($script:BtnMigrateHome)
 
-# Shows the current data directory and service log path so the user knows
-# exactly where data lives before deciding whether to migrate it.
-$script:DataPathLabel = New-CardLabel -Text "" -X 26 -Y 230 -Width 1106 -Height 20 -Size 8.5
+# Shows the current data directory, service log path, and live service ports so
+# the user knows exactly where data lives before deciding whether to migrate it.
+$script:DataPathLabel = New-CardLabel -Text "" -X 26 -Y 258 -Width 1106 -Height 36 -Size 8.5
 $script:DataPathLabel.ForeColor = [System.Drawing.Color]::FromArgb(107, 114, 128)
 $script:Form.Controls.Add($script:DataPathLabel)
 
-$script:LocalEnvLabel = New-CardLabel -Text "" -X 24 -Y 262 -Width 300 -Height 26 -Size 10.5 -Style ([System.Drawing.FontStyle]::Bold)
+$script:LocalEnvLabel = New-CardLabel -Text "" -X 24 -Y 302 -Width 300 -Height 26 -Size 10.5 -Style ([System.Drawing.FontStyle]::Bold)
 $script:Form.Controls.Add($script:LocalEnvLabel)
 
-$script:BtnScanAgents = New-FlatButton -Text "" -X 948 -Y 258 -Width 92 -Height 28
+$script:BtnScanAgents = New-FlatButton -Text "" -X 948 -Y 298 -Width 92 -Height 28
 $script:Form.Controls.Add($script:BtnScanAgents)
 
-$script:BtnConfigureAgents = New-FlatButton -Text "" -X 1044 -Y 258 -Width 104 -Height 28 -Primary
+$script:BtnConfigureAgents = New-FlatButton -Text "" -X 1044 -Y 298 -Width 104 -Height 28 -Primary
 $script:Form.Controls.Add($script:BtnConfigureAgents)
 
 $script:ToolCardsPanel = New-Object System.Windows.Forms.Panel
-$script:ToolCardsPanel.Size = New-Object System.Drawing.Size(1132, 308)
-$script:ToolCardsPanel.Location = New-Object System.Drawing.Point(24, 294)
+$script:ToolCardsPanel.Size = New-Object System.Drawing.Size(1132, 300)
+$script:ToolCardsPanel.Location = New-Object System.Drawing.Point(24, 332)
 $script:ToolCardsPanel.BackColor = [System.Drawing.Color]::FromArgb(250, 250, 250)
 $script:ToolCardsPanel.AutoScroll = $true
 $script:Form.Controls.Add($script:ToolCardsPanel)
@@ -2642,7 +3076,7 @@ for ($i = 0; $i -lt $initialCards.Count; $i++) {
 
 $script:ActionGroup = New-Object System.Windows.Forms.GroupBox
 $script:ActionGroup.Size = New-Object System.Drawing.Size(548, 150)
-$script:ActionGroup.Location = New-Object System.Drawing.Point(24, 606)
+$script:ActionGroup.Location = New-Object System.Drawing.Point(24, 644)
 $script:Form.Controls.Add($script:ActionGroup)
 
 $script:ActionLabel = New-Object System.Windows.Forms.Label
@@ -2653,7 +3087,7 @@ $script:ActionGroup.Controls.Add($script:ActionLabel)
 
 $script:LogGroup = New-Object System.Windows.Forms.GroupBox
 $script:LogGroup.Size = New-Object System.Drawing.Size(572, 150)
-$script:LogGroup.Location = New-Object System.Drawing.Point(584, 606)
+$script:LogGroup.Location = New-Object System.Drawing.Point(584, 644)
 $script:Form.Controls.Add($script:LogGroup)
 
 $script:LogBox = New-Object System.Windows.Forms.TextBox
@@ -2690,6 +3124,9 @@ $script:BtnStartStop.Add_Click({
     Update-Status
 })
 $script:BtnMcp.Add_Click({ Copy-McpConfig })
+$script:BtnViewer.Add_Click({ Open-MemoryViewer })
+$script:BtnMemorySettings.Add_Click({ Show-MemorySettingsDialog })
+$script:BtnCheckStatus.Add_Click({ Show-MemoryStatus })
 $script:BtnScanAgents.Add_Click({ Scan-AgentClients })
 $script:BtnConfigureAgents.Add_Click({ Configure-AgentClients })
 $script:BtnCopyCli.Add_Click({ Copy-CliCommands })

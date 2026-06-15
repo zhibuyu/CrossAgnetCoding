@@ -18,10 +18,10 @@ https://github.com/zhibuyu/CrossAgnetCoding
 
 CrossAgnetCoding 的做法：
 
-- 本地启动 [rohitg00/agentmemory](https://github.com/rohitg00/agentmemory) 服务（`http://localhost:3111`）作为统一的"长期记忆"。
+- 本地启动 AgentMemory 服务（`http://localhost:3111`）作为统一的"长期记忆"。
 - 一键把这个记忆服务以 MCP 形式写进各个工具的配置里，让它们都连到同一个记忆。
 - 提供"共享 Prompt"和"工作区桥接"，把记忆的用法和最近的交接摘要喂给每个工具。
-
+持久化记忆参考[rohitg00/agentmemory](https://github.com/rohitg00/agentmemory) 
 多工具统一管理的思路参考了 [farion1231/cc-switch](https://github.com/farion1231/cc-switch/)。
 
 ## 支持的 Coding Agent
@@ -51,13 +51,16 @@ CrossAgnetCoding 的做法：
 
 - **安装全部**：检查并安装运行所需的 Node.js、AgentMemory、iii-engine。
 - **启动服务 / 停止服务**（同一个按钮，切换）：启动或停止本地 AgentMemory 服务。服务未运行时显示蓝色"启动服务"，运行中显示红色"停止服务"。状态会自动刷新。
+- **检查状态**：调用 `agentmemory status`，把健康状态、会话/记忆条数、Provider、Embeddings 模式等显示在日志区。
+- **打开记忆查看器**：用浏览器打开 `http://localhost:3113`，可视化浏览/管理所有共享记忆（服务需在运行中）。
+- **记忆设置**：配置语义检索方式、LLM 提供方、MCP 工具集（详见下方"记忆设置"一节）。
 - **复制 MCP 配置**：把 AgentMemory 的 MCP JSON 复制到剪贴板，便于手动粘贴到工具里。
 - **复制 CLI 命令**：复制各工具手动接入的命令/路径提示到剪贴板。
 - **同步共享 Prompt**：见下方"功能详解"。
 - **桥接工作区**：见下方"功能详解"。
 - **迁移数据目录**：把整个数据目录复制到新位置，并把程序未来的读写指向新目录（旧目录保留）。
 
-界面中间会显示**当前数据目录**和**服务日志路径**，方便你在迁移前确认数据到底存在哪里、日志去哪里看。
+界面中间会显示**当前数据目录**、**服务日志路径**和**服务端口**（REST 3111 / 流 3112 / 查看器 3113），方便你在迁移前确认数据到底存在哪里、日志去哪里看、查看器在哪个端口。
 
 ### 本地环境检查区
 
@@ -98,6 +101,51 @@ CrossAgnetCoding 的做法：
 
 把当前数据目录整体复制到你选择的新目录，并更新 `settings.json` 里的 `dataHome` 指向，之后程序读写都用新目录。旧目录保留不动。
 
+## 记忆是怎么共享的（通俗版）
+
+AgentMemory 本质是**一个只跑在你本机的"记忆数据库 + 服务"**，分三层：
+
+1. **底层 iii-engine**（就是要装的 `iii.exe`）：提供三个原语 `state_store`（键值库）+ `stream_store`（事件流）+ 引擎，记忆就存在这里。
+2. **中间 AgentMemory 服务**：在 `localhost:3111` 开放 REST 接口（另有 3112 流接口、3113 网页查看器）。
+3. **接入层 MCP**：每个 coding 工具里写的那段 `agentmemory` MCP 配置，是一个统一指向 `http://localhost:3111` 的"转接头"。
+
+**共享是这样发生的**：Codex / TRAE / Qoder / Claude 等工具全都连到**同一个 3111 服务**。A 工具把"这个项目用 pnpm、接口在 X 文件"写进记忆，B 工具下次开工一搜就能拿到。检索方式是**关键词（BM25）+ 语义（向量）混合**。
+
+## 记忆设置：语义检索 / LLM / 工具集
+
+点界面上的 **记忆设置** 按钮打开。设置保存在本机 `settings.json` 的 `memory` 字段里，**启动/重启服务后对 AgentMemory 生效**（API Key 只存在本地）。
+
+### ① 语义检索（向量）
+
+"语义"这一半需要把文字转成向量，因此需要一个 embedding 模型。提供三种方式：
+
+| 方式 | 说明 | 需要什么 |
+| --- | --- | --- |
+| **纯关键词 BM25**（默认） | 零配置，开箱即用，中文带 jieba 分词。语义近似匹配弱一些。 | 无 |
+| **本地 MiniLM** | 离线本地跑 `all-MiniLM-L6-v2`，语义检索效果好、不联网、不花钱。 | 一次性下载 ~90MB 模型 + `@xenova/transformers` 依赖 |
+| **云端 API** | 用 OpenAI / Gemini / Voyage / Cohere / OpenRouter 的向量服务。 | 对应 API Key + 联网 |
+
+**关于 all-MiniLM-L6-v2**：约 2300 万参数、ONNX 量化后 ~90MB、**纯 CPU 跑，不需要显卡**，普通电脑（含本机 Win11）都能轻松部署。在"记忆设置"里选"本地 MiniLM"并点**安装本地向量依赖**即可装好 `@xenova/transformers`（`onnxruntime-node` 一般已随 AgentMemory 装好）。
+
+> ⚠️ **国内网络注意**：本地模型首次会从 `huggingface.co` 下载。勾选"本地模型走 hf-mirror.com 镜像"可显著加速；也可改用云端 API，或干脆用纯关键词（不下载任何模型）。
+
+### ② LLM 智能压缩（可选）
+
+配上 OpenAI / MiniMax / Anthropic / Gemini / OpenRouter 的 API Key 后，AgentMemory 会用 LLM 对记忆做更聪明的压缩/总结（并可启用知识图谱、记忆整合等）。**不配也能用**——此时是 noop 模式，用零-LLM 合成压缩，检索照常工作。
+
+### ③ MCP 工具集
+
+- **core**（7 个工具，默认）：最常用的记忆读写。
+- **all**（51 个工具）：暴露 AgentMemory 的全部能力给 coding 工具。
+
+## 服务端口
+
+| 端口 | 用途 |
+| --- | --- |
+| `3111` | REST API（MCP 与各工具连接的地址） |
+| `3112` | Streams 流接口 |
+| `3113` | 网页查看器（"打开记忆查看器"按钮指向这里） |
+
 ## 数据目录
 
 默认位置：
@@ -125,8 +173,9 @@ CrossAgnetCoding.exe
 2. 若缺少 Node.js / AgentMemory / iii-engine，点击**安装全部**。
 3. 点击**启动服务**，确认状态变为 `运行中 (localhost:3111)`。
 4. 在"本地环境检查"区点击**全部配置**写入各工具的 MCP 配置；或在单张卡片上点**配置 / 重新配置**只配某一个工具。
-5. 需要时点**同步共享 Prompt**、**桥接工作区**。
-6. 配置变更后，按需重启 Codex、TRAE、Qoder CN、Claude、Gemini、OpenClaw、Hermes 等工具，使其加载新的 MCP 配置。
+5. （可选）点**记忆设置**选择语义检索方式 / 配置 LLM / 选工具集，保存后**重启服务**生效；点**检查状态**确认 Provider 与 Embeddings 模式；点**打开记忆查看器**在浏览器查看记忆。
+6. 需要时点**同步共享 Prompt**、**桥接工作区**。
+7. 配置变更后，按需重启 Codex、TRAE、Qoder CN、Claude、Gemini、OpenClaw、Hermes 等工具，使其加载新的 MCP 配置。
 
 ## 命令行 / TUI（CLI Usage）
 
@@ -140,7 +189,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\src\AgentMemoryManager
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\src\AgentMemoryManager.ps1 -Cli workspace bridge "D:\path\to\project"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\src\AgentMemoryManager.ps1 -Cli config home
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\src\AgentMemoryManager.ps1 -Cli config migrate "D:\CrossAgnetCodingData"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\src\AgentMemoryManager.ps1 -Cli memory show
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\src\AgentMemoryManager.ps1 -Cli memory env
 ```
+
+`memory show` 打印当前记忆设置；`memory env` 打印这些设置会传给 AgentMemory 服务的环境变量（API Key 以 `***set***` 脱敏）。
 
 TUI 模式：
 
