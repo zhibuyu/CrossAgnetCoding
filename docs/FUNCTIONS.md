@@ -2,7 +2,7 @@
 
 This document explains the public behavior and important internal functions so the project can be maintained after release.
 
-Version: 0.3.0-mvp
+Version: 0.0.1
 
 ## Main User Workflows
 

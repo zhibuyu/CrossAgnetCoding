@@ -38,6 +38,9 @@ foreach ($requiredTargetFeature in @(
 
 foreach ($requiredStartupFeature in @(
     "function Get-CommandPathSafe",
+    "function Get-ServicePortConflicts",
+    "function Get-ServiceStartupFailureDetail",
+    "function Get-CleanLogLine",
     "function Get-PlaceholderToolCards",
     "function Test-AgentInstallPresent",
     "Add_Shown",
@@ -157,7 +160,7 @@ $env:CAC_TEST_NO_NODE_EXEC = $oldNoNodeExec
 
 foreach ($required in @(
     '$script:APP_NAME = "CrossAgnetCoding"',
-    '$script:APP_VERSION = "0.3.0-mvp"',
+    '$script:APP_VERSION = "0.0.1"',
     "function Get-AgentClientStatuses",
     "function Get-AgentTargetDefinitions",
     "function Configure-CodexMcp",
@@ -200,7 +203,7 @@ foreach ($required in @(
 $readme = Get-Content -LiteralPath (Join-Path $root "README.md") -Raw -Encoding UTF8
 foreach ($requiredReadme in @(
     "# CrossAgnetCoding",
-    "Version: 0.3.0-mvp",
+    "Version: 0.0.1",
     "CrossAgnetCoding.exe",
     "https://github.com/rohitg00/agentmemory",
     "https://github.com/farion1231/cc-switch",

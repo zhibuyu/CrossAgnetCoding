@@ -1,6 +1,6 @@
 # CrossAgnetCoding
 
-Version: 0.3.0-mvp
+Version: 0.0.1
 
 CrossAgnetCoding 是一个 Windows 桌面工具（GUI + CLI/TUI），用于在本机多个 Coding Agent 之间**共享 AgentMemory 记忆与工作区交接（handoff）上下文**。
 

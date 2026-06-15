@@ -16,7 +16,8 @@ $script:AM_DIR = Join-Path $env:USERPROFILE ".agentmemory"
 $script:LOCAL_BIN = Join-Path $env:USERPROFILE ".local\bin"
 $script:NPM_GLOBAL = Join-Path $env:APPDATA "npm"
 $script:APP_NAME = "CrossAgnetCoding"
-$script:APP_VERSION = "0.3.0-mvp"
+$script:APP_VERSION = "0.0.1"
+$script:III_VERSION = "v0.11.2"
 $script:PORT = 3111
 $script:STREAMS_PORT = 3112
 $script:VIEWER_PORT = 3113
@@ -32,7 +33,7 @@ $script:NodeVersionFailureCooldownSeconds = 300
 
 $script:Text = @{
     zh = @{
-        WindowTitle = "CrossAgnetCoding v0.3.0-mvp"
+        WindowTitle = "CrossAgnetCoding v0.0.1"
         Title = "CrossAgnetCoding 跨 Coding Agent 记忆管理器"
         SettingsTitle = "设置"
         AboutTab = "关于"
@@ -168,7 +169,7 @@ $script:Text = @{
         InitialLog3 = "安装完成后点击 [启动服务]"
     }
     en = @{
-        WindowTitle = "CrossAgnetCoding v0.3.0-mvp"
+        WindowTitle = "CrossAgnetCoding v0.0.1"
         Title = "CrossAgnetCoding Cross-Agent Memory Manager"
         SettingsTitle = "Settings"
         AboutTab = "About"
@@ -427,6 +428,144 @@ function Get-ServicePids {
     } catch {
         return @()
     }
+}
+
+function Get-ProcessCommandLineById {
+    param([int]$ProcessId)
+
+    if ($ProcessId -le 0) {
+        return ""
+    }
+
+    try {
+        $proc = Get-CimInstance Win32_Process -Filter ("ProcessId = {0}" -f $ProcessId) -ErrorAction Stop
+        if ($proc -and -not [string]::IsNullOrWhiteSpace([string]$proc.CommandLine)) {
+            return [string]$proc.CommandLine
+        }
+    } catch {
+    }
+
+    return ""
+}
+
+function Get-ServicePortConflicts {
+    param([int[]]$Ports = @($script:PORT, $script:STREAMS_PORT, $script:VIEWER_PORT))
+
+    $conflicts = New-Object System.Collections.ArrayList
+    foreach ($port in $Ports) {
+        try {
+            $listeners = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction Stop)
+            foreach ($listener in $listeners) {
+                $ownerPid = [int]$listener.OwningProcess
+                $name = "unknown"
+                try {
+                    $proc = Get-Process -Id $ownerPid -ErrorAction Stop
+                    $name = [string]$proc.ProcessName
+                } catch {
+                }
+
+                $commandLine = Get-ProcessCommandLineById -ProcessId $ownerPid
+                $ownerText = ($name + " " + $commandLine).ToLowerInvariant()
+                [void]$conflicts.Add([pscustomobject]@{
+                    Port                 = $port
+                    LocalAddress         = [string]$listener.LocalAddress
+                    ProcessId            = $ownerPid
+                    ProcessName          = $name
+                    LooksLikeAgentMemory = (($ownerText -match "agentmemory") -or ($ownerText -match "iii(\.exe)?"))
+                })
+            }
+        } catch {
+        }
+    }
+
+    return $conflicts.ToArray()
+}
+
+function Format-ServicePortConflict {
+    param([object]$Conflict)
+
+    return ("Port {0} is in use by PID {1} ({2}) at {3}" -f $Conflict.Port, $Conflict.ProcessId, $Conflict.ProcessName, $Conflict.LocalAddress)
+}
+
+function Show-ServicePortConflicts {
+    param([object[]]$Conflicts)
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    [void]$lines.Add("AgentMemory cannot start because required ports are already in use:")
+    foreach ($conflict in $Conflicts) {
+        [void]$lines.Add("  - " + (Format-ServicePortConflict -Conflict $conflict))
+    }
+
+    foreach ($line in $lines) {
+        Write-Log $line
+    }
+
+    $message = ($lines -join "`r`n")
+    Set-ActionFeedback ($lines[0]) ([System.Drawing.Color]::Red)
+    [System.Windows.Forms.MessageBox]::Show($message, (T "StartFailTitle"), "OK", "Error") | Out-Null
+}
+
+function Get-CleanLogLine {
+    param([string]$Line)
+
+    if ($null -eq $Line) {
+        return ""
+    }
+
+    $escape = [regex]::Escape([string][char]27)
+    $clean = [regex]::Replace([string]$Line, ($escape + "\[[0-9;?]*[ -/]*[@-~]"), "")
+    $clean = [regex]::Replace($clean, "[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "")
+    return $clean.Trim()
+}
+
+function Get-ServiceStartupFailureDetail {
+    param(
+        [string]$ServiceLog,
+        [int]$TimeoutSeconds
+    )
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    if (-not [string]::IsNullOrWhiteSpace($ServiceLog)) {
+        [void]$lines.Add("Service log: $ServiceLog")
+    }
+
+    $conflicts = @(Get-ServicePortConflicts)
+    if ($conflicts.Count -gt 0) {
+        [void]$lines.Add("Current port listeners:")
+        foreach ($conflict in $conflicts) {
+            [void]$lines.Add("  - " + (Format-ServicePortConflict -Conflict $conflict))
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($ServiceLog) -and (Test-Path -LiteralPath $ServiceLog)) {
+        $rawTail = @(Get-Content -LiteralPath $ServiceLog -Tail 60 -ErrorAction SilentlyContinue)
+        $cleanTail = @($rawTail | ForEach-Object { Get-CleanLogLine $_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        $interesting = @($cleanTail | Where-Object {
+            $_ -match "failed to bind" -or
+            $_ -match "Port already in use" -or
+            $_ -match "address already in use" -or
+            $_ -match "EADDRINUSE" -or
+            $_ -match "process crashed" -or
+            $_ -match "did not become ready" -or
+            $_ -match "^Error:"
+        })
+
+        if ($interesting.Count -gt 0) {
+            [void]$lines.Add("Detected startup error:")
+            foreach ($line in $interesting | Select-Object -Last 12) {
+                [void]$lines.Add("  " + $line)
+            }
+        } elseif ($cleanTail.Count -gt 0) {
+            [void]$lines.Add("Recent service log:")
+            foreach ($line in $cleanTail | Select-Object -Last 8) {
+                [void]$lines.Add("  " + $line)
+            }
+        }
+    } elseif (-not [string]::IsNullOrWhiteSpace($ServiceLog)) {
+        [void]$lines.Add("Service log was not created before the $TimeoutSeconds second timeout.")
+    }
+
+    return ($lines -join "`r`n")
 }
 
 function Get-EnvironmentStatus {
@@ -2058,6 +2197,31 @@ if ($SelfTest) {
         [void]$errors.Add("Get-CommandPathSafe should return empty for a missing command")
     }
 
+    Write-Output "SELFTEST_STAGE startup-diagnostics"
+    $startupLog = Join-Path $env:TEMP ("cac-startup-log-" + [guid]::NewGuid().ToString("N") + ".log")
+    try {
+        $esc = [char]27
+        Set-Content -LiteralPath $startupLog -Encoding UTF8 -Value @(
+            ($esc.ToString() + "[?25l|"),
+            "Error: failed to initialize worker 'iii-http': failed to bind to 127.0.0.1:3111",
+            "|",
+            "Common causes:",
+            "  - Port already in use (see below)"
+        )
+        $cleanLine = Get-CleanLogLine ($esc.ToString() + "[?25lError: failed to bind to 127.0.0.1:3111")
+        if ($cleanLine -match [regex]::Escape([string]$esc) -or $cleanLine -notmatch "failed to bind") {
+            [void]$errors.Add("Startup log cleaner did not remove control sequences")
+        }
+
+        $detail = Get-ServiceStartupFailureDetail -ServiceLog $startupLog -TimeoutSeconds 60
+        if ($detail -notmatch "failed to bind to 127.0.0.1:3111" -or $detail -notmatch "Port already in use") {
+            [void]$errors.Add("Startup failure detail did not surface bind failure")
+        }
+    } finally {
+        Remove-Item -LiteralPath $startupLog -Force -ErrorAction SilentlyContinue
+    }
+    Write-Output "SELFTEST_STAGE startup-diagnostics-done"
+
     # Placeholder cards must cover every target without scanning so the window can
     # render instantly before status is populated.
     $placeholderCards = @(Get-PlaceholderToolCards)
@@ -2469,11 +2633,26 @@ function Install-All {
 
         $iiiInAgentMemory = Join-Path $script:AM_DIR "bin\iii.exe"
         $iiiInLocal = Join-Path $script:LOCAL_BIN "iii.exe"
-        if ((Test-Path -LiteralPath $iiiInAgentMemory) -or (Test-Path -LiteralPath $iiiInLocal)) {
+        $iiiPath = if (Test-Path -LiteralPath $iiiInAgentMemory) { $iiiInAgentMemory } elseif (Test-Path -LiteralPath $iiiInLocal) { $iiiInLocal } else { $null }
+        $iiiOk = $false
+        if ($iiiPath) {
+            try {
+                $iiiVer = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($iiiPath).ProductVersion
+                if ($iiiVer -and $iiiVer.Trim() -eq $script:III_VERSION) {
+                    $iiiOk = $true
+                }
+            } catch {}
+        }
+        if ($iiiOk) {
             Write-Log (T "AlreadyInstalled" @("iii-engine"))
         } else {
+            if ($iiiPath) {
+                Write-Log "iii-engine version mismatch (need $script:III_VERSION), reinstalling..."
+                Remove-Item -LiteralPath $iiiInAgentMemory -Force -ErrorAction SilentlyContinue
+                Remove-Item -LiteralPath $iiiInLocal -Force -ErrorAction SilentlyContinue
+            }
             try {
-                Write-Log "Downloading iii-engine..."
+                Write-Log "Downloading iii-engine $script:III_VERSION..."
                 New-Item -ItemType Directory -Path (Join-Path $script:AM_DIR "bin") -Force | Out-Null
                 New-Item -ItemType Directory -Path $script:LOCAL_BIN -Force | Out-Null
 
@@ -2484,7 +2663,8 @@ function Install-All {
                 }
 
                 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-                Invoke-WebRequest -Uri "https://github.com/iii-hq/iii/releases/download/iii/v0.11.2/iii-x86_64-pc-windows-msvc.zip" -OutFile $zip -UseBasicParsing
+                $iiiUrl = "https://github.com/iii-hq/iii/releases/download/iii/$script:III_VERSION/iii-x86_64-pc-windows-msvc.zip"
+                Invoke-WebRequest -Uri $iiiUrl -OutFile $zip -UseBasicParsing
                 Expand-Archive -Path $zip -DestinationPath $extractDir -Force
 
                 $found = Get-ChildItem -LiteralPath $extractDir -Recurse -Filter "iii.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -2520,10 +2700,14 @@ function Start-AgentMemory {
     Set-ActionFeedback (T "Starting") ([System.Drawing.Color]::DarkOrange)
 
     try {
-        if (Test-ServiceRunning) {
+        $restListeners = @(Get-ServicePortConflicts -Ports @($script:PORT))
+        if ($restListeners.Count -gt 0 -and (@($restListeners | Where-Object { $_.LooksLikeAgentMemory }).Count -gt 0)) {
             Update-Status
             Set-ActionFeedback (T "Running" @($script:PORT)) ([System.Drawing.Color]::DarkGreen)
             [System.Windows.Forms.MessageBox]::Show((T "StartAlreadyBody" @($script:PORT)), (T "StartAlreadyTitle"), "OK", "Information") | Out-Null
+            return
+        } elseif ($restListeners.Count -gt 0) {
+            Show-ServicePortConflicts -Conflicts $restListeners
             return
         }
 
@@ -2549,6 +2733,12 @@ function Start-AgentMemory {
         Set-ManagerEnv
         Apply-MemoryEnv
 
+        $portConflicts = @(Get-ServicePortConflicts -Ports @($script:STREAMS_PORT, $script:VIEWER_PORT))
+        if ($portConflicts.Count -gt 0) {
+            Show-ServicePortConflicts -Conflicts $portConflicts
+            return
+        }
+
         # The service writes its iii data store to ./data relative to its working
         # directory, so run it inside the configurable storage dir (keeps the
         # growing state_store/stream_store off the launch folder and on whatever
@@ -2559,6 +2749,7 @@ function Start-AgentMemory {
         foreach ($dir in @($script:AM_DIR, $workDir)) {
             Remove-Item -LiteralPath (Join-Path $dir "iii.pid") -Force -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath (Join-Path $dir "engine-state.json") -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath (Join-Path $dir "worker.pid") -Force -ErrorAction SilentlyContinue
         }
 
         $agentMemoryCmd = Join-Path $script:NPM_GLOBAL "agentmemory.cmd"
@@ -2591,13 +2782,17 @@ function Start-AgentMemory {
             Update-Status
             Set-ActionFeedback (T "StartFailTitle") ([System.Drawing.Color]::Red)
             Write-Log (T "StartFailBody" @($timeout))
-            if (Test-Path -LiteralPath $serviceLog) {
-                $tail = Get-Content -LiteralPath $serviceLog -Tail 8 -ErrorAction SilentlyContinue
-                foreach ($line in $tail) {
+            $detail = Get-ServiceStartupFailureDetail -ServiceLog $serviceLog -TimeoutSeconds $timeout
+            if (-not [string]::IsNullOrWhiteSpace($detail)) {
+                foreach ($line in ($detail -split "`r?`n")) {
                     if ($line) { Write-Log $line }
                 }
             }
-            [System.Windows.Forms.MessageBox]::Show((T "StartFailBody" @($timeout)), (T "StartFailTitle"), "OK", "Error") | Out-Null
+            $message = T "StartFailBody" @($timeout)
+            if (-not [string]::IsNullOrWhiteSpace($detail)) {
+                $message = $message + "`r`n`r`n" + $detail
+            }
+            [System.Windows.Forms.MessageBox]::Show($message, (T "StartFailTitle"), "OK", "Error") | Out-Null
         }
     } finally {
         Set-Busy $false
@@ -3499,6 +3694,7 @@ $timer.Add_Tick({
     }
 })
 $timer.Start()
+$script:RefreshTimer = $timer
 
 Apply-Language
 Set-ActionFeedback (T "Scanning")
@@ -3530,6 +3726,14 @@ $script:InitialScanTimer.Add_Tick({
 $script:Form.Add_Shown({ $script:InitialScanTimer.Start() })
 
 [void]$script:Form.ShowDialog()
+
+# Clean up timers after the window closes.
+$script:RefreshTimer.Stop()
+$script:RefreshTimer.Dispose()
+if ($script:InitialScanTimer) {
+    $script:InitialScanTimer.Stop()
+    $script:InitialScanTimer.Dispose()
+}
 
 } catch {
     $logPath = Join-Path ([System.IO.Path]::GetTempPath()) "CrossAgnetCoding-error.log"
