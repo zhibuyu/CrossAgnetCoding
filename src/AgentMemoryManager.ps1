@@ -1608,6 +1608,11 @@ function Get-MemorySettings {
         LlmApiKey           = [string](Get-Prop $memory "llmApiKey" "")
         Tools               = [string](Get-Prop $memory "tools" "core")               # core | all
         UseHfMirror         = [bool](Get-Prop $memory "useHfMirror" $true)
+        # LLM-gated features (all require an LLM key; default off, matching AgentMemory).
+        GraphExtraction     = [bool](Get-Prop $memory "graphExtraction" $false)
+        Consolidation       = [bool](Get-Prop $memory "consolidation" $false)
+        AutoCompress        = [bool](Get-Prop $memory "autoCompress" $false)
+        InjectContext       = [bool](Get-Prop $memory "injectContext" $false)
     }
 }
 
@@ -1628,6 +1633,10 @@ function Save-MemorySettings {
         llmApiKey           = [string]$Memory.LlmApiKey
         tools               = [string]$Memory.Tools
         useHfMirror         = [bool]$Memory.UseHfMirror
+        graphExtraction     = [bool]$Memory.GraphExtraction
+        consolidation       = [bool]$Memory.Consolidation
+        autoCompress        = [bool]$Memory.AutoCompress
+        injectContext       = [bool]$Memory.InjectContext
     }
     $settings | Add-Member -NotePropertyName "memory" -NotePropertyValue ([pscustomobject]$obj) -Force
     return (Write-CrossAgnetCodingSettings -Settings $settings)
@@ -1674,6 +1683,10 @@ function Get-MemoryEnvMap {
         VOYAGE_API_KEY              = ""
         COHERE_API_KEY              = ""
         AGENTMEMORY_TOOLS           = ""
+        GRAPH_EXTRACTION_ENABLED    = ""
+        CONSOLIDATION_ENABLED       = ""
+        AGENTMEMORY_AUTO_COMPRESS   = ""
+        AGENTMEMORY_INJECT_CONTEXT  = ""
         HF_ENDPOINT                 = ""
         TRANSFORMERS_CACHE          = ""
         HF_HOME                     = ""
@@ -1737,6 +1750,13 @@ function Get-MemoryEnvMap {
     } else {
         $map["AGENTMEMORY_TOOLS"] = "core"
     }
+
+    # LLM-gated features (knowledge graph, consolidation, etc.). Only meaningful
+    # with an LLM provider configured; set "true" when the user opts in.
+    if ($m.GraphExtraction) { $map["GRAPH_EXTRACTION_ENABLED"] = "true" }
+    if ($m.Consolidation)   { $map["CONSOLIDATION_ENABLED"] = "true" }
+    if ($m.AutoCompress)    { $map["AGENTMEMORY_AUTO_COMPRESS"] = "true" }
+    if ($m.InjectContext)   { $map["AGENTMEMORY_INJECT_CONTEXT"] = "true" }
 
     return $map
 }
@@ -2384,6 +2404,10 @@ function Invoke-CliMode {
         Write-Output "llmApiKey: $(if ($m.LlmApiKey) { '***set***' } else { '(empty)' })"
         Write-Output "tools: $($m.Tools)"
         Write-Output "useHfMirror: $($m.UseHfMirror)"
+        Write-Output "graphExtraction: $($m.GraphExtraction)"
+        Write-Output "consolidation: $($m.Consolidation)"
+        Write-Output "autoCompress: $($m.AutoCompress)"
+        Write-Output "injectContext: $($m.InjectContext)"
         Write-Output "localEmbeddingReady: $(Test-LocalEmbeddingReady)"
         return
     } elseif ($command -eq "memory env") {
@@ -3394,7 +3418,7 @@ function Show-MemorySettingsDialog {
 
     $dlg = New-Object System.Windows.Forms.Form
     $dlg.Text = T "MemorySettings"
-    $dlg.Size = New-Object System.Drawing.Size(600, 648)
+    $dlg.Size = New-Object System.Drawing.Size(600, 742)
     $dlg.StartPosition = "CenterParent"
     $dlg.FormBorderStyle = "FixedDialog"
     $dlg.MaximizeBox = $false
@@ -3497,12 +3521,29 @@ function Show-MemorySettingsDialog {
     [void](& $addLabel "LLM Key" 20 414 150)
     $txtLlmKey = & $addText 180 412 388 $m.LlmApiKey
 
-    # Section 3: MCP tool surface
-    [void](& $addLabel ($(if ($isEn) { "3. MCP tool surface" } else { "③ MCP 工具集" })) 20 452 540 22 $true)
-    [void](& $addLabel ($(if ($isEn) { "Tools exposed" } else { "暴露给工具的工具集" })) 20 484 150)
-    $cmbTools = & $addCombo @($(if ($isEn) { @("core (7 tools, default)", "all (51 tools)") } else { @("core（7 个工具，默认）", "all（51 个工具）") })) 180 482 260
+    # Section 3: LLM-gated features (knowledge graph etc. — all need the LLM above)
+    [void](& $addLabel ($(if ($isEn) { "3. LLM-powered features (need LLM key above)" } else { "③ LLM 增强功能（需上面配置 LLM）" })) 20 452 540 22 $true)
+    $addCheck = {
+        param([string]$Text, [int]$X, [int]$Y, [int]$W, [bool]$Checked)
+        $cb = New-Object System.Windows.Forms.CheckBox
+        $cb.Text = $Text
+        $cb.Location = New-Object System.Drawing.Point($X, $Y)
+        $cb.Size = New-Object System.Drawing.Size($W, 22)
+        $cb.Checked = $Checked
+        $dlg.Controls.Add($cb)
+        return $cb
+    }
+    $chkGraph        = & $addCheck ($(if ($isEn) { "Knowledge graph extraction" } else { "知识图谱提取" })) 180 478 230 $m.GraphExtraction
+    $chkConsolidation = & $addCheck ($(if ($isEn) { "Memory consolidation" } else { "记忆整合" })) 416 478 152 $m.Consolidation
+    $chkAutoCompress  = & $addCheck ($(if ($isEn) { "LLM auto-compress" } else { "LLM 自动压缩" })) 180 502 230 $m.AutoCompress
+    $chkInject        = & $addCheck ($(if ($isEn) { "Inject context into chat" } else { "注入上下文到对话" })) 416 502 152 $m.InjectContext
 
-    [void](& $addLabel ($(if ($isEn) { "Base URL / model are optional (empty = provider default). OpenAI-compatible accepts SiliconFlow / vLLM / Ollama-style endpoints. Saved locally; applied after a service restart." } else { "端点地址/模型可留空（＝用官方默认）；OpenAI 兼容可填 SiliconFlow / vLLM / Ollama 等。设置保存在本机，重启服务后生效；Key 仅存本地。" })) 20 516 552 44 $false $true)
+    # Section 4: MCP tool surface
+    [void](& $addLabel ($(if ($isEn) { "4. MCP tool surface" } else { "④ MCP 工具集" })) 20 538 540 22 $true)
+    [void](& $addLabel ($(if ($isEn) { "Tools exposed" } else { "暴露给工具的工具集" })) 20 570 150)
+    $cmbTools = & $addCombo @($(if ($isEn) { @("core (7 tools, default)", "all (51 tools)") } else { @("core（7 个工具，默认）", "all（51 个工具）") })) 180 568 260
+
+    [void](& $addLabel ($(if ($isEn) { "Base URL must NOT include /chat/completions (it is appended automatically). Model/URL empty = provider default. Section 3 needs the LLM above. Saved locally; applied after a service restart." } else { "端点地址不要带 /chat/completions（会自动补全）；端点/模型留空＝用官方默认。③ 的功能需配好上面的 LLM。设置保存在本机，重启服务后生效；Key 仅存本地。" })) 20 600 552 56 $false $true)
 
     # Initial selections
     $cmbMode.SelectedIndex = [Math]::Max(0, [Array]::IndexOf($modeValues, $m.EmbeddingMode))
@@ -3512,7 +3553,7 @@ function Show-MemorySettingsDialog {
 
     $btnCancel = New-Object System.Windows.Forms.Button
     $btnCancel.Text = $(if ($isEn) { "Cancel" } else { "取消" })
-    $btnCancel.Location = New-Object System.Drawing.Point(370, 566)
+    $btnCancel.Location = New-Object System.Drawing.Point(370, 660)
     $btnCancel.Size = New-Object System.Drawing.Size(90, 30)
     $btnCancel.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
     $btnCancel.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
@@ -3520,7 +3561,7 @@ function Show-MemorySettingsDialog {
 
     $btnSave = New-Object System.Windows.Forms.Button
     $btnSave.Text = $(if ($isEn) { "Save" } else { "保存" })
-    $btnSave.Location = New-Object System.Drawing.Point(468, 566)
+    $btnSave.Location = New-Object System.Drawing.Point(468, 660)
     $btnSave.Size = New-Object System.Drawing.Size(90, 30)
     $btnSave.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
     $btnSave.BackColor = [System.Drawing.Color]::FromArgb(24, 144, 255)
@@ -3543,6 +3584,10 @@ function Show-MemorySettingsDialog {
             LlmApiKey           = $txtLlmKey.Text.Trim()
             Tools               = $toolValues[$cmbTools.SelectedIndex]
             UseHfMirror         = [bool]$chkHfMirror.Checked
+            GraphExtraction     = [bool]$chkGraph.Checked
+            Consolidation       = [bool]$chkConsolidation.Checked
+            AutoCompress        = [bool]$chkAutoCompress.Checked
+            InjectContext       = [bool]$chkInject.Checked
         }
         [void](Save-MemorySettings -Memory $saved)
         $dlg.DialogResult = [System.Windows.Forms.DialogResult]::OK
