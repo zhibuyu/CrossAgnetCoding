@@ -197,7 +197,7 @@ Self-test uses a temporary user profile &mdash; your real configs are never touc
 
 ## Security &mdash; Keys Stay Local
 
-API keys you enter in **Memory Settings** are stored **only** in your local `settings.json` (inside your data home, e.g. `%USERPROFILE%\.CrossAgnetCoding` &mdash; outside the repository). They are sent **only** to the LLM/embedding endpoint you configure, and are **never** committed to git.
+API keys you enter in **Memory Settings** are stored **only** in your local `settings.json` (inside your data home, e.g. `%USERPROFILE%\.CrossAgnetCoding` &mdash; outside the repository). On Windows they are **encrypted at rest** (DPAPI, bound to your user account) and decrypted only in memory when the service starts. They are sent **only** to the LLM/embedding endpoint you configure, and are **never** committed to git. (Migrate an old plaintext key with `... -Cli memory encrypt`, or just re-save in Memory Settings.)
 
 Two safeguards keep secrets out of the repo:
 

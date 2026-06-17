@@ -197,7 +197,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\selftest.ps1
 
 ## 安全 —— 金鑰只留本機
 
-你在**記憶設定**裡填的 API Key **只**儲存在本機 `settings.json`（位於資料目錄，如 `%USERPROFILE%\.CrossAgnetCoding`，在儲存庫之外）。它**只**會傳送給你設定的 LLM/Embedding 端點，**絕不**提交到 git。
+你在**記憶設定**裡填的 API Key **只**儲存在本機 `settings.json`（位於資料目錄，如 `%USERPROFILE%\.CrossAgnetCoding`，在儲存庫之外）。在 Windows 上它**加密儲存**（DPAPI，繫結你的使用者帳戶），僅在服務啟動時於記憶體中解密使用。它**只**會傳送給你設定的 LLM/Embedding 端點，**絕不**提交到 git。（舊的明文 Key 可用 `... -Cli memory encrypt` 遷移，或在記憶設定裡重新儲存一次即可。）
 
 兩道防線確保金鑰不入庫：
 

@@ -1573,10 +1573,47 @@ function Write-CrossAgnetCodingSettings {
     return $path
 }
 
+function Protect-Secret {
+    # Encrypt a secret at rest with Windows DPAPI (CurrentUser scope). The stored
+    # form "dpapi:<base64>" is only decryptable by the same Windows user on this
+    # machine. Off-Windows (mac/Linux) DPAPI is unavailable, so the value is kept
+    # as-is and protected by file permissions instead.
+    param([string]$Plain)
+
+    if ([string]::IsNullOrEmpty($Plain)) { return "" }
+    if ($Plain -like "dpapi:*") { return $Plain }   # already encrypted
+    if (-not $script:IsWindows) { return $Plain }
+    try {
+        Add-Type -AssemblyName System.Security -ErrorAction Stop
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($Plain)
+        $enc = [System.Security.Cryptography.ProtectedData]::Protect($bytes, $null, [System.Security.Cryptography.DataProtectionScope]::CurrentUser)
+        return "dpapi:" + [Convert]::ToBase64String($enc)
+    } catch {
+        return $Plain
+    }
+}
+
+function Unprotect-Secret {
+    param([string]$Stored)
+
+    if ([string]::IsNullOrEmpty($Stored)) { return "" }
+    if ($Stored -notlike "dpapi:*") { return $Stored }   # legacy / plaintext
+    if (-not $script:IsWindows) { return "" }            # cannot decrypt off-Windows
+    try {
+        Add-Type -AssemblyName System.Security -ErrorAction Stop
+        $enc = [Convert]::FromBase64String($Stored.Substring(6))
+        $bytes = [System.Security.Cryptography.ProtectedData]::Unprotect($enc, $null, [System.Security.Cryptography.DataProtectionScope]::CurrentUser)
+        return [System.Text.Encoding]::UTF8.GetString($bytes)
+    } catch {
+        return ""
+    }
+}
+
 function Get-MemorySettings {
     # Reads the optional "memory" object from CrossAgnetCoding settings.json and
     # fills in safe defaults. Defaults keep AgentMemory zero-config: keyword-only
     # (BM25) search, no LLM provider, the 7-tool core surface.
+    # API keys are stored DPAPI-encrypted and decrypted here for in-memory use.
     $settings = Read-CrossAgnetCodingSettings
     $memory = $null
     if ($settings.PSObject.Properties.Name -contains "memory") {
@@ -1599,13 +1636,13 @@ function Get-MemorySettings {
         EmbeddingBaseUrl    = [string](Get-Prop $memory "embeddingBaseUrl" "")
         EmbeddingModel      = [string](Get-Prop $memory "embeddingModel" "")
         EmbeddingDimensions = [string](Get-Prop $memory "embeddingDimensions" "")
-        EmbeddingApiKey     = [string](Get-Prop $memory "embeddingApiKey" "")
+        EmbeddingApiKey     = [string](Unprotect-Secret ([string](Get-Prop $memory "embeddingApiKey" "")))
         # LLM "format": none | openai (Chat Completions) | anthropic (Messages) |
         # gemini | openrouter | minimax. openai/anthropic accept a custom Base URL.
         LlmFormat           = [string](Get-Prop $memory "llmFormat" ([string](Get-Prop $memory "llmProvider" "none")))
         LlmBaseUrl          = [string](Get-Prop $memory "llmBaseUrl" "")
         LlmModel            = [string](Get-Prop $memory "llmModel" "")
-        LlmApiKey           = [string](Get-Prop $memory "llmApiKey" "")
+        LlmApiKey           = [string](Unprotect-Secret ([string](Get-Prop $memory "llmApiKey" "")))
         Tools               = [string](Get-Prop $memory "tools" "core")               # core | all
         UseHfMirror         = [bool](Get-Prop $memory "useHfMirror" $true)
         # LLM-gated features (all require an LLM key; default off, matching AgentMemory).
@@ -1626,11 +1663,11 @@ function Save-MemorySettings {
         embeddingBaseUrl    = [string]$Memory.EmbeddingBaseUrl
         embeddingModel      = [string]$Memory.EmbeddingModel
         embeddingDimensions = [string]$Memory.EmbeddingDimensions
-        embeddingApiKey     = [string]$Memory.EmbeddingApiKey
+        embeddingApiKey     = Protect-Secret ([string]$Memory.EmbeddingApiKey)
         llmFormat           = [string]$Memory.LlmFormat
         llmBaseUrl          = [string]$Memory.LlmBaseUrl
         llmModel            = [string]$Memory.LlmModel
-        llmApiKey           = [string]$Memory.LlmApiKey
+        llmApiKey           = Protect-Secret ([string]$Memory.LlmApiKey)
         tools               = [string]$Memory.Tools
         useHfMirror         = [bool]$Memory.UseHfMirror
         graphExtraction     = [bool]$Memory.GraphExtraction
@@ -2404,11 +2441,18 @@ function Invoke-CliMode {
         Write-Output "llmApiKey: $(if ($m.LlmApiKey) { '***set***' } else { '(empty)' })"
         Write-Output "tools: $($m.Tools)"
         Write-Output "useHfMirror: $($m.UseHfMirror)"
+        Write-Output "keyStorage: $(if ($script:IsWindows) { 'DPAPI-encrypted (CurrentUser)' } else { 'plaintext (file perms)' })"
         Write-Output "graphExtraction: $($m.GraphExtraction)"
         Write-Output "consolidation: $($m.Consolidation)"
         Write-Output "autoCompress: $($m.AutoCompress)"
         Write-Output "injectContext: $($m.InjectContext)"
         Write-Output "localEmbeddingReady: $(Test-LocalEmbeddingReady)"
+        return
+    } elseif ($command -eq "memory encrypt") {
+        # Migrate any legacy plaintext API keys in settings.json to DPAPI-encrypted form.
+        $m = Get-MemorySettings
+        [void](Save-MemorySettings -Memory $m)
+        Write-Output "memory secrets re-saved (encrypted at rest on Windows via DPAPI)"
         return
     } elseif ($command -eq "memory env") {
         $map = Get-MemoryEnvMap
