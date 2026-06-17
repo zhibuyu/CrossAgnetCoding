@@ -7,3 +7,7 @@
 
 # AgentMemory 服务在启动目录生成的运行时数据
 /data/
+
+# Stray Windows PowerShell module cache
+/Microsoft/
+
