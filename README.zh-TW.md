@@ -195,6 +195,25 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\selftest.ps1
 
 ---
 
+## 安全 —— 金鑰只留本機
+
+你在**記憶設定**裡填的 API Key **只**儲存在本機 `settings.json`（位於資料目錄，如 `%USERPROFILE%\.CrossAgnetCoding`，在儲存庫之外）。它**只**會傳送給你設定的 LLM/Embedding 端點，**絕不**提交到 git。
+
+兩道防線確保金鑰不入庫：
+
+- **`.gitignore`** 屏蔽 `settings.json`、`.env*`、`*.local.json`、`*.key`、`*.secret` 等；
+- **pre-commit 鉤子**（`scripts/git-hooks/pre-commit`）在每次提交前掃描，攔截疑似 API Key（OpenAI / Anthropic / 智譜 …）。
+
+複製後啟用鉤子：
+
+```bash
+git config core.hooksPath scripts/git-hooks
+```
+
+確屬誤報時可用 `git commit --no-verify` 跳過。
+
+---
+
 ## 專案結構
 
 ```

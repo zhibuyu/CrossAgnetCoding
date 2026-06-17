@@ -195,6 +195,25 @@ Self-test uses a temporary user profile &mdash; your real configs are never touc
 
 ---
 
+## Security &mdash; Keys Stay Local
+
+API keys you enter in **Memory Settings** are stored **only** in your local `settings.json` (inside your data home, e.g. `%USERPROFILE%\.CrossAgnetCoding` &mdash; outside the repository). They are sent **only** to the LLM/embedding endpoint you configure, and are **never** committed to git.
+
+Two safeguards keep secrets out of the repo:
+
+- **`.gitignore`** excludes `settings.json`, `.env*`, `*.local.json`, `*.key`, `*.secret`, etc.
+- **A pre-commit hook** (`scripts/git-hooks/pre-commit`) scans every commit and blocks anything that looks like an API key (OpenAI / Anthropic / Zhipu &hellip;).
+
+Enable the hook after cloning:
+
+```bash
+git config core.hooksPath scripts/git-hooks
+```
+
+A genuine false positive can be bypassed with `git commit --no-verify`.
+
+---
+
 ## Project Structure
 
 ```
