@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch]$SelfTest,
     [switch]$Cli,
     [switch]$Tui,
