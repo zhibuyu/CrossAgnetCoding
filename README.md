@@ -152,15 +152,6 @@ Built-in web viewer at `http://localhost:3113` for browsing and managing memorie
 
 ---
 
-## Screenshots
-
-<!-- TODO: add screenshots -->
-<p align="center">
-  <i>Screenshots coming soon &mdash; PRs welcome!</i>
-</p>
-
----
-
 ## Build
 
 ### Windows (IExpress EXE)

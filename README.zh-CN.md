@@ -152,15 +152,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\src\AgentMemoryManager.ps1
 
 ---
 
-## 截图
-
-<!-- TODO: 添加截图 -->
-<p align="center">
-  <i>截图即将上线——欢迎 PR！</i>
-</p>
-
----
-
 ## 构建
 
 ### Windows（IExpress EXE）
