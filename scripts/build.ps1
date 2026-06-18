@@ -1,26 +1,8 @@
-﻿param(
-    [string]$OutputExe = ""
-)
-
-$ErrorActionPreference = "Stop"
-
-# Platform detection
-$isWindows = $PSVersionTable.PSVersion.Major -ge 6 -and $IsWindows -or ([Environment]::OSVersion.Platform -eq 'Win32NT')
-if ($PSVersionTable.PSVersion.Major -lt 6) { $isWindows = $true }
-
-if (-not $isWindows) {
-    Write-Host "WARNING: Build is Windows-only. On macOS/Linux, run the source directly:"
-    Write-Host "  pwsh ./src/AgentMemoryManager.ps1"
-    exit 1
-}
-
-$root = Split-Path -Parent $PSScriptRoot
+﻿$ErrorActionPreference = "Stop"
+$root = "d:\otherWorkspace\code_plugin\CrossAgentCoding"
 $src = Join-Path $root "src"
 $stage = Join-Path $root "_manager_stage"
-
-if ([string]::IsNullOrWhiteSpace($OutputExe)) {
-    $OutputExe = Join-Path $root "release\CrossAgentCoding.exe"
-}
+$OutputExe = Join-Path $root "release\CrossAgentCoding.exe"
 
 # Ensure the output directory exists
 $outputDir = Split-Path -Parent $OutputExe
@@ -44,12 +26,11 @@ if (-not $csc) {
 }
 
 # ── Step 2: Prepare the PS1 script as an embedded resource ──
-# Keep original encoding (UTF-8 with BOM) — do NOT convert to UTF-16
 $scriptSource = Join-Path $src "AgentMemoryManager.ps1"
 $resourceFile = Join-Path $stage "AgentMemoryManager.ps1"
 Copy-Item -LiteralPath $scriptSource -Destination $resourceFile -Force
 
-# ── Step 3: Write the C# launcher source ──
+# ── Step 3: Write the C# launcher source (no visible window) ──
 $launcherCs = Join-Path $stage "Launcher.cs"
 $iconPath = Join-Path $root "icon\icon.ico"
 
@@ -61,7 +42,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
-class CrossAgentCodingLauncher : Form
+class CrossAgentCodingLauncher
 {
     [DllImport("user32.dll")]
     static extern bool SetForegroundWindow(IntPtr hWnd);
@@ -79,38 +60,22 @@ class CrossAgentCodingLauncher : Form
     private System.Windows.Forms.Timer watchTimer;
     private System.Windows.Forms.Timer findWindowTimer;
     private IntPtr psFormHandle = IntPtr.Zero;
+    private Form hiddenForm;
 
     public CrossAgentCodingLauncher()
     {
-        // Form must be visible (not minimized, not hidden) for Shown to fire.
-        // We show it normally first, then hide it after Shown fires.
-        this.ShowInTaskbar = true;
-        this.ShowIcon = true;
-        this.Text = "CrossAgentCoding";
-        this.WindowState = FormWindowState.Normal;
-        this.FormBorderStyle = FormBorderStyle.FixedToolWindow;
-        this.Size = new System.Drawing.Size(200, 40);
-        this.StartPosition = FormStartPosition.CenterScreen;
-
-        this.Activated += (s, e) =>
-        {
-            if (psFormHandle != IntPtr.Zero)
-            {
-                if (IsIconic(psFormHandle))
-                    ShowWindow(psFormHandle, SW_RESTORE);
-                else
-                    ShowWindow(psFormHandle, SW_SHOW);
-                SetForegroundWindow(psFormHandle);
-            }
-        };
-
-        // Use Shown event — fires after the form is visible
-        this.Shown += (s, e) =>
-        {
-            // Hide the launcher window immediately
-            this.Opacity = 0;
-            this.WindowState = FormWindowState.Minimized;
-        };
+        // Create a hidden Form to host the message loop and timers.
+        // This Form is never shown, never appears in taskbar, and has no icon.
+        hiddenForm = new Form();
+        hiddenForm.ShowInTaskbar = false;
+        hiddenForm.ShowIcon = false;
+        hiddenForm.Text = "CrossAgentCoding";
+        hiddenForm.WindowState = FormWindowState.Minimized;
+        hiddenForm.FormBorderStyle = FormBorderStyle.None;
+        hiddenForm.Size = new System.Drawing.Size(1, 1);
+        hiddenForm.StartPosition = FormStartPosition.Manual;
+        hiddenForm.Location = new System.Drawing.Point(-9999, -9999);
+        hiddenForm.Load += (s, e) => { hiddenForm.Hide(); };
 
         findWindowTimer = new System.Windows.Forms.Timer { Interval = 300 };
         findWindowTimer.Tick += (s, e) =>
@@ -137,7 +102,7 @@ class CrossAgentCodingLauncher : Form
             {
                 watchTimer.Stop();
                 findWindowTimer.Stop();
-                this.Close();
+                hiddenForm.Close();
                 Application.Exit();
             }
         };
@@ -225,9 +190,8 @@ class CrossAgentCodingLauncher : Form
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         var launcher = new CrossAgentCodingLauncher();
-        // Start PowerShell BEFORE showing the form, so we don't depend on events
         launcher.LaunchPowerShell();
-        Application.Run(launcher);
+        Application.Run(launcher.hiddenForm);
     }
 }
 '@
@@ -259,9 +223,6 @@ if ($LASTEXITCODE -ne 0) {
 # ── Step 5: Cleanup ──
 Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
 
-# NTFS "file tunneling" preserves the original CreationTime when an exe is
-# rebuilt in place under the same name, which makes Explorer show a stale
-# "Created" date. Stamp both timestamps to now so the build time is honest.
 $built = Get-Item -LiteralPath $OutputExe
 $now = Get-Date
 $built.CreationTime = $now
